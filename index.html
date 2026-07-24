@@ -54,27 +54,27 @@
         <ul class="sidebar-menu">
           <li class="sidebar-menu-category">เมนูพนักงานสอบสวน</li>
           <li>
-            <a id="navItemDashboard" href="#" onclick="switchView('dashboard', event)" class="sidebar-item active">
+            <a id="navItemDashboard" href="javascript:void(0)" onclick="switchView('dashboard', event)" class="sidebar-item active">
               <i class="fa-solid fa-chart-line"></i> <span>แดชบอร์ด & ปฏิทิน</span>
             </a>
           </li>
           <li>
-            <a id="navItemRequests" href="#" onclick="switchView('requests', event)" class="sidebar-item">
-              <i class="fa-solid fa-folder-open"></i> <span id="navItemRequestsLabel">ทะเบียนคดีที่รับผิดชอบ</span>
+            <a id="navItemRequests" href="javascript:void(0)" onclick="switchView('requests', event, 'my_cases')" class="sidebar-item">
+              <i class="fa-solid fa-folder-open"></i> <span id="navItemRequestsLabel">รายการสำนวนที่รับผิดชอบ</span>
             </a>
           </li>
           <li>
-            <a id="navItemStationInbox" href="#" onclick="switchView('requests', event, 'inbox')" class="sidebar-item">
-              <i class="fa-solid fa-inbox" style="color: #f59e0b;"></i> <span>กล่องจดหมายสถานี (รอรับคดี)</span>
+            <a id="navItemStationInbox" href="javascript:void(0)" onclick="openMobileStationInbox(event)" class="sidebar-item">
+              <i class="fa-solid fa-inbox" style="color: #f59e0b;"></i> <span>คำร้องสถานี (รอรับคดี)</span>
             </a>
           </li>
           <li>
-            <a href="#" onclick="triggerMobileQuickUpload(event)" class="sidebar-item">
+            <a href="javascript:void(0)" onclick="triggerMobileQuickUpload(event)" class="sidebar-item">
               <i class="fa-solid fa-cloud-arrow-up" style="color: var(--accent-gold);"></i> <span>อัพโหลดคำร้อง PDF ส่งศาล</span>
             </a>
           </li>
           <li>
-            <a id="navItemDownloadICS" href="#" onclick="downloadPersonalICS(event)" class="sidebar-item">
+            <a id="navItemDownloadICS" href="javascript:void(0)" onclick="downloadPersonalICS(event)" class="sidebar-item">
               <i class="fa-solid fa-calendar-plus" style="color: #34d399;"></i> <span>ดาวน์โหลดปฏิทิน (.ics)</span>
             </a>
           </li>
@@ -92,13 +92,13 @@
       <button id="mbNavDashboard" onclick="switchView('dashboard', event)" class="bnav-item active" title="แดชบอร์ด & ปฏิทิน">
         <i class="fa-solid fa-chart-line"></i>
       </button>
-      <button id="mbNavRequests" onclick="switchView('requests', event)" class="bnav-item" title="รายการคดีของฉัน">
+      <button id="mbNavRequests" onclick="switchView('requests', event, 'my_cases')" class="bnav-item" title="รายการสำนวนที่รับผิดชอบ">
         <i class="fa-solid fa-folder-open"></i>
       </button>
       <button id="mbNavQuickUpload" onclick="triggerMobileQuickUpload(event)" class="bnav-item center-action" title="อัพโหลด PDF">
         <i class="fa-solid fa-cloud-arrow-up"></i>
       </button>
-      <button id="mbNavInbox" onclick="switchView('requests', event, 'inbox')" class="bnav-item" title="กล่องจดหมายสถานี (รอรับคดี)">
+      <button id="mbNavInbox" onclick="openMobileStationInbox(event)" class="bnav-item" title="คำร้องสถานี (รอรับคดี)">
         <i class="fa-solid fa-inbox"></i>
       </button>
       <button onclick="handleLogout()" class="bnav-item" title="ออกจากระบบ">
@@ -113,7 +113,7 @@
       <div id="dashboardView" class="animate-fade-in" style="display: none;">
         <div class="view-header">
           <div class="view-title">
-            <h2 id="dashboardTitle"><i class="fa-solid fa-chart-line" style="color: var(--primary);"></i> แดชบอร์ดภาพรวมและปฏิทินกำหนดวันยื่นฝากขัง</h2>
+            <h2 id="dashboardTitle"><i class="fa-solid fa-chart-line" style="color: var(--primary);"></i> แดชบอร์ดกำหนดวันยื่นฝากขัง - ตำรวจ</h2>
             <p id="dashboardSubtitle">ติดตามกำหนดเวลาสำหรับ สภ.: สภ.เมืองอุดรธานี</p>
           </div>
         </div>
@@ -199,7 +199,7 @@
         <div id="policeRequestsSection">
           <div class="view-header">
             <div class="view-title">
-              <h2><i class="fa-solid fa-building-shield" style="color: var(--primary);"></i> รายการคดีคำร้องขอฝากขังทางจอภาพ</h2>
+              <h2><i class="fa-solid fa-building-shield" style="color: var(--primary);"></i> รายการคดียื่นคำร้องขอฝากขัง</h2>
               <p id="policeStationSub">สังกัด: สภ.เมืองอุดรธานี</p>
             </div>
             <div style="display: flex; gap: 0.5rem;">
@@ -214,6 +214,16 @@
             <!-- Rendered dynamically via app.js -->
           </div>
 
+          <!-- Sub-Tab Navigation Bar for Police View -->
+          <!-- <div id="policeSubNavTab" style="display: flex; gap: 0.5rem; margin-bottom: 1.25rem; background: #f8fafc; padding: 0.4rem; border-radius: 0.75rem; border: 1px solid #e2e8f0; flex-wrap: wrap;">
+            <button id="subTabPoliceMyCases" onclick="switchView('requests', event, 'my_cases')" class="btn-primary" style="flex: 1; padding: 0.6rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 700; cursor: pointer; text-align: center; border: 1px solid var(--primary); background: var(--primary); color: var(--accent-gold) !important; box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);">
+              <i class="fa-solid fa-folder-open"></i> รายการสำนวนที่รับผิดชอบ
+            </button>
+            <button id="subTabPoliceInbox" onclick="openMobileStationInbox(event)" class="btn-secondary" style="flex: 1; padding: 0.6rem 1rem; border-radius: 0.5rem; font-size: 0.875rem; font-weight: 600; cursor: pointer; text-align: center; background: #ffffff; color: #000000 !important; border: 1px solid #cbd5e1;">
+              <i class="fa-solid fa-inbox" style="color: #f59e0b;"></i> คำร้องสถานี (รอรับคดี) <span id="policeInboxBadgeCount" class="badge badge-status-due" style="margin-left: 0.25rem;">0</span>
+            </button>
+          </div> -->
+
           <!-- Mobile Police Quick Upload Card -->
           <div class="mobile-police-upload-card white-panel" style="padding: 1.1rem 1.25rem; margin-bottom: 1.25rem; background: linear-gradient(135deg, #1e3a8a, #1d4ed8); color: #ffffff;">
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
@@ -227,11 +237,11 @@
             </div>
           </div>
 
-          <!-- Station Inbox (Unassigned cases matching station) -->
-          <div class="white-panel" style="padding: 1.5rem; margin-bottom: 1.5rem; border: 2px dashed #f59e0b;">
+          <!-- Station Inbox Panel (Unassigned cases matching station) -->
+          <div id="policeStationInboxPanel" class="white-panel" style="padding: 1.5rem; margin-bottom: 1.5rem; border: 2px dashed #f59e0b; display: none;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
               <h3 style="font-size: 1.1rem; font-weight: 700; color: #b45309;">
-                <i class="fa-solid fa-inbox"></i> กล่องจดหมายสถานี (คำร้องฝากขังครั้งที่ 1 รอรับเป็นเจ้าของ)
+                <i class="fa-solid fa-inbox"></i> คำร้องสถานี (คำร้องฝากขังครั้งที่ 1 รอรับเป็นเจ้าของ)
               </h3>
               <span id="stationInboxCount" class="badge badge-status-due">0 คดีรอรับ</span>
             </div>
@@ -255,10 +265,10 @@
             </div>
           </div>
 
-          <!-- My Registered Cases Table -->
-          <div class="white-panel" style="padding: 1.5rem;">
+          <!-- My Registered Cases Panel -->
+          <div id="policeMyCasesPanel" class="white-panel" style="padding: 1.5rem;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.75rem;">
-              <h3 style="font-size: 1.1rem; font-weight: 700;"><i class="fa-solid fa-list-check"></i> ทะเบียนคดีที่ฉันรับผิดชอบ</h3>
+              <h3 style="font-size: 1.1rem; font-weight: 700;"><i class="fa-solid fa-list-check"></i> รายการสำนวนที่รับผิดชอบ</h3>
               <div style="position: relative;">
                 <input type="text" id="policeSearchInput" oninput="renderPoliceTable()" class="form-control" placeholder="ค้นหาเลขฝากขัง..." style="padding-left: 2.2rem; width: 220px;">
                 <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 0.8rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.85rem;"></i>
@@ -335,7 +345,7 @@
         </div>
 
         <div class="form-group">
-          <label><i class="fa-solid fa-file-pdf"></i> แนบไฟล์คำร้อง PDF (รองรับเฉพาะ .pdf ขนาดไม่เกิน 20MB)</label>
+          <label><i class="fa-solid fa-file-pdf"></i> แนบไฟล์คำร้อง PDF (รองรับเฉพาะ .pdf ขนาดไม่เกิน 5MB)</label>
           <div id="dropzone" class="dropzone" onclick="document.getElementById('pdfFileInput').click()">
             <i class="fa-solid fa-cloud-arrow-up dropzone-icon"></i>
             <div id="dropzoneText" style="font-size: 0.9rem; font-weight: 600;">คลิก หรือ ลากไฟล์ PDF มาวางที่นี่</div>

@@ -238,6 +238,16 @@ body {
   flex-shrink: 0;
 }
 
+/* Hide specific sidebar menu item: "สร้างชุดเลขคำร้อง (ยฝ./ฝ.)" per user directive */
+#navItemCreateBatch {
+  display: none !important;
+}
+
+/* Top Horizontal Navigation Bar - Hidden when sidebar is active */
+.top-nav-bar {
+  display: none !important;
+}
+
 .sidebar-menu {
   list-style: none;
   display: flex;

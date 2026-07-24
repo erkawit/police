@@ -21,7 +21,7 @@ const DAYS_PER_OCCASION = 12; // ป.วิ.อาญา ม.87: ฝากขั
 const FILING_CUTOFF_HOUR = 16; // ข้อ 6: ยื่นทางระบบได้ไม่เกิน 16.00 น.
 const PURGE_DAYS = 60;
 const CAP_MAX_K = { 48: 4, 84: 7 };
-const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
+const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 const ALLOWED_UPLOAD_EXTENSION = ".pdf";
 
 // รายชื่อ 23 สถานีตำรวจในจังหวัดอุดรธานี
@@ -172,15 +172,14 @@ function validateUploadFile(file) {
   if (!file || !file.name) {
     return { valid: false, reason: "ไม่พบไฟล์ที่จะอัพโหลด" };
   }
-  if (!file.name.toLowerCase().endsWith(ALLOWED_UPLOAD_EXTENSION)) {
-    return { valid: false, reason: `รองรับเฉพาะไฟล์นามสกุล ${ALLOWED_UPLOAD_EXTENSION} เท่านั้น` };
+  if (!file.name.toLowerCase().endsWith('.pdf')) {
+    return { valid: false, reason: "รองรับเฉพาะไฟล์เอกสาร PDF (.pdf) เท่านั้น" };
   }
   if (typeof file.sizeBytes !== "number" || !Number.isFinite(file.sizeBytes) || file.sizeBytes <= 0) {
     return { valid: false, reason: "ไม่สามารถอ่านขนาดไฟล์ได้ กรุณาลองใหม่" };
   }
   if (file.sizeBytes > MAX_UPLOAD_SIZE_BYTES) {
-    const maxMB = MAX_UPLOAD_SIZE_BYTES / (1024 * 1024);
-    return { valid: false, reason: `ไฟล์มีขนาดเกิน ${maxMB} MB กรุณาบีบอัดไฟล์หรือแยกเป็นหลายไฟล์แนบ` };
+    return { valid: false, reason: "ไฟล์จะต้องมีขนาดไม่เกิน 5 MB เท่านั้น" };
   }
   return { valid: true, reason: null };
 }
@@ -819,8 +818,8 @@ function handleLogout() {
   currentUser = null;
   sessionStorage.removeItem('eredt_session');
   sessionStorage.removeItem('eredt_last_view');
-  if (window.location.hash) {
-    history.replaceState(null, null, ' ');
+  if (window.location.protocol !== 'file:' && window.location.hash) {
+    try { history.replaceState(null, null, ' '); } catch(e) {}
   }
   showLoginView();
 }
@@ -870,7 +869,7 @@ function renderAppLayout() {
 
   // Setup Sidebar Menus based on Role
   setElementDisplay('navCategoryCourt', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none');
-  setElementDisplay('navItemCreateBatch', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none');
+  setElementDisplay('navItemCreateBatch', 'none');
   setElementDisplay('navItemHolidays', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none');
 
   setElementDisplay('navCategoryPolice', (currentUser.role === 'police') ? 'block' : 'none');
@@ -891,7 +890,10 @@ function renderAppLayout() {
   setElementDisplay('btnSyncGoogleSheet', (currentUser.role === 'admin') ? 'inline-flex' : 'none');
 
   // Restore Last Active View on Refresh
-  const hashView = (window.location.hash || '').replace('#', '').trim();
+  let hashView = '';
+  if (window.location.protocol !== 'file:') {
+    hashView = (window.location.hash || '').replace('#', '').trim();
+  }
   let savedView = hashView || sessionStorage.getItem('eredt_last_view') || 'dashboard';
   
   if (savedView === 'admin' && currentUser.role !== 'admin') {
@@ -902,19 +904,28 @@ function renderAppLayout() {
 }
 
 function switchView(viewName, event, subTab) {
-  if (event) event.preventDefault();
+  if (event) {
+    try {
+      if (typeof event.preventDefault === 'function') event.preventDefault();
+    } catch (e) {}
+  }
+
+  // Auto-close SweetAlert on mobile screens (< 768px) before rendering view
+  if (window.innerWidth < 768 && typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) {
+    Swal.close();
+  }
 
   currentActiveView = viewName;
   sessionStorage.setItem('eredt_last_view', viewName);
   
-  try {
-    if (window.history && window.history.replaceState) {
-      window.history.replaceState(null, null, '#' + viewName);
-    } else {
-      window.location.hash = viewName;
-    }
-  } catch (e) {
-    // Ignore origin frame navigation warnings on file://
+  if (window.location.protocol !== 'file:') {
+    try {
+      if (window.history && window.history.replaceState) {
+        window.history.replaceState(null, null, '#' + viewName);
+      } else {
+        window.location.hash = viewName;
+      }
+    } catch (e) {}
   }
 
   setElementDisplay('dashboardView', 'none');
@@ -937,17 +948,69 @@ function switchView(viewName, event, subTab) {
     renderDashboard();
   } else if (viewName === 'requests') {
     setElementDisplay('requestsView', 'block');
-    setElementClass('navItemRequests', 'active', true);
-    
-    if (subTab === 'inbox') {
-      setElementClass('mbNavInbox', 'active', true);
-    } else {
-      setElementClass('mbNavRequests', 'active', true);
-    }
+    setElementClass('navItemRequests', 'active', false);
+    setElementClass('navItemStationInbox', 'active', false);
+    setElementClass('mbNavRequests', 'active', false);
+    setElementClass('mbNavInbox', 'active', false);
 
     if (currentUser && currentUser.role === 'police') {
       setElementDisplay('policeRequestsSection', 'block');
       setElementDisplay('courtRequestsSection', 'none');
+
+      let currentSubTab = subTab;
+      if (!currentSubTab) {
+        currentSubTab = sessionStorage.getItem('eredt_police_subtab') || 'my_cases';
+      }
+      sessionStorage.setItem('eredt_police_subtab', currentSubTab);
+
+      if (currentSubTab === 'inbox') {
+        setElementDisplay('policeStationInboxPanel', 'block');
+        setElementDisplay('policeMyCasesPanel', 'none');
+        setElementClass('navItemStationInbox', 'active', true);
+        setElementClass('mbNavInbox', 'active', true);
+
+        const btnMyCases = document.getElementById('subTabPoliceMyCases');
+        const btnInbox = document.getElementById('subTabPoliceInbox');
+        if (btnMyCases && btnInbox) {
+          // Unselected My Cases
+          btnMyCases.style.background = '#ffffff';
+          btnMyCases.style.color = '#000000';
+          btnMyCases.style.border = '1px solid #cbd5e1';
+          btnMyCases.style.fontWeight = '600';
+          btnMyCases.style.boxShadow = 'none';
+
+          // Selected Inbox (Background: System Primary, Text: System Gold)
+          btnInbox.style.background = 'var(--primary)';
+          btnInbox.style.color = 'var(--accent-gold)';
+          btnInbox.style.border = '1px solid var(--primary)';
+          btnInbox.style.fontWeight = '700';
+          btnInbox.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.15)';
+        }
+      } else {
+        setElementDisplay('policeStationInboxPanel', 'none');
+        setElementDisplay('policeMyCasesPanel', 'block');
+        setElementClass('navItemRequests', 'active', true);
+        setElementClass('mbNavRequests', 'active', true);
+
+        const btnMyCases = document.getElementById('subTabPoliceMyCases');
+        const btnInbox = document.getElementById('subTabPoliceInbox');
+        if (btnMyCases && btnInbox) {
+          // Selected My Cases (Background: System Primary, Text: System Gold)
+          btnMyCases.style.background = 'var(--primary)';
+          btnMyCases.style.color = 'var(--accent-gold)';
+          btnMyCases.style.border = '1px solid var(--primary)';
+          btnMyCases.style.fontWeight = '700';
+          btnMyCases.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.15)';
+
+          // Unselected Inbox
+          btnInbox.style.background = '#ffffff';
+          btnInbox.style.color = '#000000';
+          btnInbox.style.border = '1px solid #cbd5e1';
+          btnInbox.style.fontWeight = '600';
+          btnInbox.style.boxShadow = 'none';
+        }
+      }
+
       renderPoliceView();
     } else {
       setElementDisplay('policeRequestsSection', 'none');
@@ -1144,6 +1207,44 @@ function openDayDetailModal(dayISO) {
 // 8. POLICE WORKFLOW & STATION INBOX
 // --------------------------------------------------------------------------
 
+function openMobileStationInbox(event) {
+  if (event) {
+    try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
+    try { if (typeof event.stopPropagation === 'function') event.stopPropagation(); } catch (e) {}
+  }
+
+  if (window.innerWidth < 768) {
+    // Auto-close existing SweetAlert on mobile
+    if (typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) {
+      Swal.close();
+    }
+
+    // Check if there are inbox items
+    const rawRequests = getRequests();
+    const holidays = getHolidays();
+    const enriched = rawRequests.map(r => enrichCase(r, holidays));
+    const stationInbox = currentUser ? enriched.filter(c => c.station === currentUser.station && !c.officer && !c.closed) : [];
+
+    if (stationInbox.length === 0) {
+      Swal.fire({
+        icon: 'info',
+        title: '<i class="fa-solid fa-inbox" style="color: #f59e0b;"></i> กล่องจดหมายสถานี',
+        html: `<div style="font-size: 0.95rem; color: #475569; line-height: 1.6;">
+                <p style="margin-bottom: 0.5rem;">ยังไม่มีคดีใหม่ที่รอรับเป็นเจ้าของ</p>
+                <p style="font-size: 0.8rem; color: #94a3b8;">สังกัด: <b>${currentUser?.station || 'ไม่ระบุ'}</b></p>
+               </div>`,
+        confirmButtonText: 'ตกลง',
+        confirmButtonColor: '#1e3a8a'
+      });
+      return;
+    }
+  }
+
+  // If has data or not mobile, switch to inbox view normally
+  switchView('requests', event, 'inbox');
+}
+window.openMobileStationInbox = openMobileStationInbox;
+
 function renderPoliceView() {
   if (!currentUser) return;
   startLiveClock();
@@ -1155,7 +1256,8 @@ function renderPoliceView() {
 
   // 1. Station Inbox: Unassigned cases for police's station
   const stationInbox = enriched.filter(c => c.station === currentUser.station && !c.officer && !c.closed);
-  document.getElementById('stationInboxCount').textContent = `${stationInbox.length} คดีรอรับ`;
+  setElementText('stationInboxCount', `${stationInbox.length} คดีรอรับ`);
+  setElementText('policeInboxBadgeCount', `${stationInbox.length}`);
 
   const inboxTbody = document.getElementById('stationInboxTableBody');
   inboxTbody.innerHTML = '';
@@ -1174,7 +1276,7 @@ function renderPoliceView() {
         <td><b style="color: #b45309;">${formatThaiDate(c.filingDeadline)} (16.00 น.)</b></td>
         <td>${formatThaiDate(c.legalDeadline)}</td>
         <td>
-          <button onclick="claimForMe('${c.caseNumber}')" class="btn-primary" style="padding: 0.3rem 0.75rem; font-size: 0.8rem; width: auto;">
+          <button onclick="claimForMe('${c.caseNumber}', event)" type="button" class="btn-primary" style="padding: 0.3rem 0.75rem; font-size: 0.8rem; width: auto;">
             <i class="fa-solid fa-hand-holding-hand"></i> รับเป็นเจ้าของคดี
           </button>
         </td>
@@ -1208,20 +1310,49 @@ function renderPoliceTable() {
 
       let actionButtons = '';
       if (!c.closed) {
-        if (isPast) {
-          actionButtons = `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 600;"><i class="fa-solid fa-ban"></i> เลย 16.00 น. ต้องยื่นที่ศาลด้วยตนเอง</span>`;
-        } else {
-          actionButtons = `
-            <button onclick="openUploadModal('${c.caseNumber}')" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto;">
-              <i class="fa-solid fa-upload"></i> ${c.fileName ? 'อัพโหลดไฟล์ใหม่ทับ' : 'อัพโหลด PDF'}
+        const isDownloaded = !!c.downloaded;
+        const isPast = isPastCutoff(c.filingDeadline);
+
+        if (c.fileName) {
+          actionButtons += `
+            <button onclick="previewPdfFile('${c.caseNumber}', event)" type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #0284c7; border-color: #0284c7; color: #fff; margin-right: 0.3rem;" title="ดูตัวอย่างไฟล์ PDF">
+              <i class="fa-solid fa-file-pdf"></i> Preview PDF
             </button>
           `;
-          if (!c.history || c.history.length === 0) {
+        }
+
+        if (isPast) {
+          actionButtons += `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 600;"><i class="fa-solid fa-ban"></i> เลย 16.00 น. ต้องยื่นที่ศาลด้วยตนเอง</span>`;
+        } else {
+          const uploadLabel = c.fileName ? 'อัพโหลดไฟล์ใหม่ทับ' : 'อัพโหลด PDF';
+          if (isDownloaded) {
             actionButtons += `
-              <button onclick="openReturnModal('${c.caseNumber}')" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #d97706; border-color: #d97706; margin-left: 0.3rem;">
-                <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
+              <button disabled type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8;" title="ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถอัพโหลดทับได้">
+                <i class="fa-solid fa-upload"></i> ${uploadLabel}
               </button>
             `;
+          } else {
+            actionButtons += `
+              <button onclick="openUploadModal('${c.caseNumber}')" type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto;">
+                <i class="fa-solid fa-upload"></i> ${uploadLabel}
+              </button>
+            `;
+          }
+
+          if (!c.history || c.history.length === 0) {
+            if (isDownloaded) {
+              actionButtons += `
+                <button disabled type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #cbd5e1; border-color: #cbd5e1; color: #94a3b8; opacity: 0.55; cursor: not-allowed; margin-left: 0.3rem;" title="ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถคืนสำนวนได้">
+                  <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
+                </button>
+              `;
+            } else {
+              actionButtons += `
+                <button onclick="openReturnModal('${c.caseNumber}')" type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #d97706; border-color: #d97706; color: #fff; margin-left: 0.3rem;">
+                  <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
+                </button>
+              `;
+            }
           }
         }
       } else {
@@ -1262,7 +1393,11 @@ function renderPoliceTable() {
   }
 }
 
-function claimForMe(caseNumber) {
+function claimForMe(caseNumber, event) {
+  if (event) {
+    try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
+    try { if (typeof event.stopPropagation === 'function') event.stopPropagation(); } catch (e) {}
+  }
   const requests = getRequests();
   const index = requests.findIndex(r => r.caseNumber === caseNumber);
   if (index !== -1) {
@@ -1272,11 +1407,51 @@ function claimForMe(caseNumber) {
     renderPoliceView();
   }
 }
+window.claimForMe = claimForMe;
+
+function previewPdfFile(caseNumber, event) {
+  if (event) {
+    try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
+    try { if (typeof event.stopPropagation === 'function') event.stopPropagation(); } catch (e) {}
+  }
+  const requests = getRequests();
+  const c = requests.find(r => r.caseNumber === caseNumber);
+  if (!c || !c.fileName) {
+    Swal.fire({ icon: 'warning', title: 'ไม่พบไฟล์ PDF', text: 'คดีนี้ยังไม่ได้ถูกอัพโหลดไฟล์ PDF' });
+    return;
+  }
+
+  if (c.fileUrl) {
+    window.open(c.fileUrl, '_blank');
+  } else {
+    Swal.fire({
+      icon: 'info',
+      title: `<i class="fa-solid fa-file-pdf" style="color: #dc2626;"></i> ${c.fileName}`,
+      html: `<div style="text-align: left; font-size: 0.9rem; color: #334155; line-height: 1.6;">
+              <p style="margin-bottom: 0.4rem;"><b>เลขคำร้องฝากขัง:</b> ${c.caseNumber} (ครั้งที่ ${c.k})</p>
+              <p style="margin-bottom: 0.4rem;"><b>ชื่อไฟล์ PDF:</b> ${c.fileName}</p>
+              <p style="margin-bottom: 0.4rem;"><b>สถานะดาวน์โหลดของศาล:</b> ${c.downloaded ? '<span style="color: #059669; font-weight: 600;">ศาลเปิดดู/ดาวน์โหลดแล้ว (ไม่สามารถอัพโหลดทับหรือคืนสำนวนได้)</span>' : '<span style="color: #d97706; font-weight: 600;">รอศาลตรวจรับ/ดาวน์โหลด (สามารถอัพโหลดทับไฟล์ใหม่ได้)</span>'}</p>
+             </div>`,
+      confirmButtonText: 'ตกลง',
+      confirmButtonColor: '#1e3a8a'
+    });
+  }
+}
+window.previewPdfFile = previewPdfFile;
 
 function openUploadModal(caseNumber) {
   const requests = getRequests();
   const c = requests.find(r => r.caseNumber === caseNumber);
   if (!c) return;
+
+  if (c.downloaded) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ไม่สามารถอัพโหลดทับได้',
+      text: 'เจ้าหน้าที่ศาลได้ทำการเปิดดู/ดาวน์โหลดเอกสาร PDF นี้ไปเรียบร้อยแล้ว'
+    });
+    return;
+  }
 
   document.getElementById('uploadCaseNumber').value = c.caseNumber;
   document.getElementById('uploadCaseNumberDisplay').textContent = `เลขคดี: ${c.caseNumber}`;
@@ -1464,6 +1639,16 @@ function handleCreateRequest(event) {
 }
 
 function openReturnModal(caseNumber) {
+  const requests = getRequests();
+  const c = requests.find(r => r.caseNumber === caseNumber);
+  if (c && c.downloaded) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ไม่สามารถคืนสำนวนได้',
+      text: 'เจ้าหน้าที่ศาลได้ทำการเปิดดู/ดาวน์โหลดเอกสาร PDF นี้ไปเรียบร้อยแล้ว'
+    });
+    return;
+  }
   document.getElementById('returnCaseNumber').value = caseNumber;
   document.getElementById('returnReasonInput').value = '';
   openModal('returnToPoolModal');
@@ -1521,6 +1706,19 @@ function downloadPersonalICS(event) {
 // --------------------------------------------------------------------------
 
 function renderCourtView() {
+  if (!currentUser) return;
+
+  const curYear = new Date().getFullYear();
+  const beYear = curYear < 2400 ? curYear + 543 : curYear;
+  const batchYearInput = document.getElementById('batchYearInput');
+  if (batchYearInput && !batchYearInput.value) batchYearInput.value = beYear;
+
+  setThaiDatePickerValue('batchStartDateInput', new Date());
+
+  const rawRequests = getRequests();
+  const holidays = getHolidays();
+  const enriched = rawRequests.map(r => enrichCase(r, holidays));
+
   // Populate Station dropdown filter
   const stationSelect = document.getElementById('courtStationFilter');
   if (stationSelect && stationSelect.options.length <= 1) {
@@ -1530,7 +1728,106 @@ function renderCourtView() {
     });
   }
 
+  // Render Sub-Sections matching uploaded image workflow:
+  // 1. Assigned to station, waiting for police claim
+  const assignedUnclaimed = enriched.filter(c => c.station && !c.officer && !c.closed);
+  const countAssignedEl = document.getElementById('countAssignedUnclaimed');
+  if (countAssignedEl) countAssignedEl.textContent = assignedUnclaimed.length;
+
+  const containerAssigned = document.getElementById('containerAssignedUnclaimed');
+  if (containerAssigned) {
+    if (assignedUnclaimed.length === 0) {
+      containerAssigned.innerHTML = `
+        <div style="text-align: center; padding: 0.85rem; color: #94a3b8; font-size: 0.85rem; background: #f8fafc; border-radius: 0.5rem;">
+          ไม่มีคดีที่รอพนักงานรับตอนนี้
+        </div>
+      `;
+    } else {
+      let html = `<div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem;">`;
+      assignedUnclaimed.forEach(c => {
+        html += `
+          <div style="background: #fff8f0; border: 1px solid #fed7aa; padding: 0.6rem 0.85rem; border-radius: 0.5rem;">
+            <div style="font-weight: 700; color: #b45309; font-size: 0.9rem;">${c.caseNumber}</div>
+            <div style="font-size: 0.775rem; color: #78350f; margin-top: 0.15rem;">
+              <i class="fa-solid fa-building-shield"></i> ${c.station}
+            </div>
+            <div style="font-size: 0.725rem; color: #a16207; margin-top: 0.1rem;">
+              วันที่เริ่ม: ${formatThaiDate(c.startDate)}
+            </div>
+          </div>
+        `;
+      });
+      html += `</div>`;
+      containerAssigned.innerHTML = html;
+    }
+  }
+
+  // 2. Unassigned cases waiting for station pairing
+  const unassignedCases = enriched.filter(c => !c.station && !c.officer && !c.closed);
+  const countUnassignedEl = document.getElementById('countUnassignedTotal');
+  if (countUnassignedEl) countUnassignedEl.textContent = unassignedCases.length;
+
+  const summaryUnassignedEl = document.getElementById('summaryUnassignedCount');
+  if (summaryUnassignedEl) summaryUnassignedEl.textContent = unassignedCases.length;
+
+  const summaryUnclaimedEl = document.getElementById('summaryUnclaimedCount');
+  if (summaryUnclaimedEl) summaryUnclaimedEl.textContent = assignedUnclaimed.length;
+
+  const containerUnassigned = document.getElementById('containerUnassignedBatches');
+  if (containerUnassigned) {
+    if (unassignedCases.length === 0) {
+      containerUnassigned.innerHTML = `
+        <div style="text-align: center; padding: 0.85rem; color: #94a3b8; font-size: 0.85rem; background: #f8fafc; border-radius: 0.5rem;">
+          ไม่มีเลขที่รอจับคู่สถานี
+        </div>
+      `;
+    } else {
+      let html = `<div style="display: flex; flex-direction: column; gap: 0.75rem;">`;
+      unassignedCases.forEach(c => {
+        const safeId = c.caseNumber.replace(/[^a-zA-Z0-9]/g, '_');
+        html += `
+          <div style="background: #f0f9ff; border: 1px solid #bae6fd; padding: 0.75rem 1rem; border-radius: 0.5rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+              <span style="font-weight: 700; color: #0369a1; font-size: 0.95rem; margin-right: 0.5rem;">${c.caseNumber}</span>
+              <span style="font-size: 0.775rem; color: #0284c7;">(วันที่เริ่ม: ${formatThaiDate(c.startDate)})</span>
+            </div>
+            <div style="display: flex; gap: 0.5rem; align-items: center;">
+              <select id="selectPair_${safeId}" class="form-control" style="font-size: 0.8rem; padding: 0.25rem 0.5rem; width: 190px;">
+                <option value="">-- เลือกสถานีตำรวจ (23 สภ.) --</option>
+                ${UDON_STATIONS.map(st => `<option value="${st}">${st}</option>`).join('')}
+              </select>
+              <button onclick="pairCaseToStation('${c.caseNumber}')" class="btn-primary" style="padding: 0.3rem 0.75rem; font-size: 0.8rem; width: auto;">
+                <i class="fa-solid fa-link"></i> จับคู่สถานี
+              </button>
+            </div>
+          </div>
+        `;
+      });
+      html += `</div>`;
+      containerUnassigned.innerHTML = html;
+    }
+  }
+
   renderCourtRequestsTable();
+}
+
+function pairCaseToStation(caseNumber) {
+  const safeId = caseNumber.replace(/[^a-zA-Z0-9]/g, '_');
+  const selectEl = document.getElementById(`selectPair_${safeId}`);
+  if (!selectEl || !selectEl.value) {
+    Swal.fire({ icon: 'warning', title: 'กรุณาเลือกสถานีตำรวจ', text: 'เลือกสถานีตำรวจที่ต้องการจับคู่ก่อนกดจับคู่' });
+    return;
+  }
+
+  const station = selectEl.value;
+  const requests = getRequests();
+  const target = requests.find(r => r.caseNumber === caseNumber);
+  if (target) {
+    target.station = station;
+    saveRequests(requests);
+    renderCourtView();
+    Swal.fire({ icon: 'success', title: 'จับคู่สถานีเรียบร้อย', text: `จับคู่เลขคดี ${caseNumber} กับ ${station} สำเร็จ`, timer: 1200, showConfirmButton: false });
+  }
 }
 
 function renderCourtRequestsTable() {
@@ -1545,9 +1842,27 @@ function renderCourtRequestsTable() {
 
   let filtered = enriched;
   if (stationFilter) filtered = filtered.filter(c => c.station === stationFilter);
-  if (statusFilter) filtered = filtered.filter(c => c.status === statusFilter);
+
+  if (statusFilter) {
+    if (statusFilter === 'uploaded') {
+      filtered = filtered.filter(c => c.fileName || c.status === 'uploaded' || c.status === 'downloaded');
+    } else if (statusFilter === 'due') {
+      filtered = filtered.filter(c => c.status === 'due' || (c.daysRemaining !== null && c.daysRemaining >= 0 && c.daysRemaining <= 3));
+    } else if (statusFilter === 'blocked') {
+      filtered = filtered.filter(c => c.status === 'blocked');
+    } else if (statusFilter === 'pending') {
+      filtered = filtered.filter(c => !c.fileName && !c.closed && c.status !== 'blocked');
+    } else {
+      filtered = filtered.filter(c => c.status === statusFilter);
+    }
+  }
+
   if (searchTerm) {
-    filtered = filtered.filter(c => c.caseNumber.toLowerCase().includes(searchTerm) || (c.station && c.station.toLowerCase().includes(searchTerm)));
+    filtered = filtered.filter(c => 
+      c.caseNumber.toLowerCase().includes(searchTerm) || 
+      (c.station && c.station.toLowerCase().includes(searchTerm)) ||
+      (c.officer && c.officer.toLowerCase().includes(searchTerm))
+    );
   }
 
   const tbody = document.getElementById('courtTableBody');
@@ -1818,14 +2133,35 @@ function renderAdminView() {
 
 function openHolidayModal(event) {
   if (event) event.preventDefault();
-  setThaiDatePickerValue('holidayDateInput', new Date());
+  
+  // Auto-close SweetAlert on mobile screens (< 768px)
+  if (window.innerWidth < 768 && typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) {
+    Swal.close();
+  }
+
+  const el = document.getElementById('holidayModal');
+  if (el) el.classList.add('active');
   renderHolidayTable();
-  openModal('holidayModal');
+
+  // Force set holidayDateInput to REAL today by destroying and recreating flatpickr
+  const dateInput = document.getElementById('holidayDateInput');
+  if (dateInput) {
+    // Destroy existing flatpickr instance completely
+    if (dateInput._flatpickr) {
+      dateInput._flatpickr.destroy();
+    }
+    // Set raw value to today's ISO date
+    const realToday = new Date();
+    dateInput.value = toISO(realToday);
+    // Create fresh flatpickr with today's date
+    attachThaiDatePicker(dateInput);
+  }
 }
 
 function renderHolidayTable() {
   const holidays = getHolidays();
   const tbody = document.getElementById('holidayTableBody');
+  if (!tbody) return;
   tbody.innerHTML = '';
 
   holidays.forEach((h, index) => {
@@ -1834,10 +2170,76 @@ function renderHolidayTable() {
       <td><b>${formatThaiDate(h.date)}</b></td>
       <td>${h.name}</td>
       <td>
-        <button onclick="deleteHoliday(${index})" class="btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem; background-color: #dc2626; color: #fff;"><i class="fa-solid fa-trash"></i> ลบ</button>
+        <div style="display: flex; gap: 0.35rem; align-items: center;">
+          <button onclick="editHoliday(${index})" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; background-color: #2563eb; color: #fff; border: none; border-radius: 0.35rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem;">
+            <i class="fa-solid fa-pen-to-square"></i> แก้ไข
+          </button>
+          <button onclick="deleteHoliday(${index})" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; background-color: #dc2626; color: #fff; border: none; border-radius: 0.35rem; cursor: pointer; display: inline-flex; align-items: center; gap: 0.25rem;">
+            <i class="fa-solid fa-trash"></i> ลบ
+          </button>
+        </div>
       </td>
     `;
     tbody.appendChild(tr);
+  });
+}
+
+function editHoliday(index) {
+  const holidays = getHolidays();
+  const h = holidays[index];
+  if (!h) return;
+
+  Swal.fire({
+    title: '<i class="fa-solid fa-pen-to-square" style="color: #2563eb;"></i> แก้ไขวันหยุดราชการ',
+    html: `
+      <div style="text-align: left; margin-top: 0.5rem;">
+        <div style="margin-bottom: 0.85rem;">
+          <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.35rem; color: #374151;">วันที่หยุด</label>
+          <input type="date" id="swalEditHolidayDate" class="swal2-input" value="${h.date}" style="width: 100%; margin: 0; box-sizing: border-box; font-family: inherit;">
+        </div>
+        <div>
+          <label style="display: block; font-weight: 600; font-size: 0.85rem; margin-bottom: 0.35rem; color: #374151;">ชื่อวันหยุด</label>
+          <input type="text" id="swalEditHolidayName" class="swal2-input" value="${h.name}" placeholder="กรอกชื่อวันหยุด" style="width: 100%; margin: 0; box-sizing: border-box; font-family: inherit;">
+        </div>
+      </div>
+    `,
+    showCancelButton: true,
+    confirmButtonText: 'บันทึกการแก้ไข',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#1e3a8a',
+    cancelButtonColor: '#64748b',
+    preConfirm: () => {
+      const dateVal = document.getElementById('swalEditHolidayDate').value;
+      const nameVal = document.getElementById('swalEditHolidayName').value.trim();
+      if (!dateVal) {
+        Swal.showValidationMessage('กรุณาเลือกวันที่หยุด');
+        return false;
+      }
+      if (!nameVal) {
+        Swal.showValidationMessage('กรุณากรอกชื่อวันหยุด');
+        return false;
+      }
+      const isDuplicate = holidays.some((item, i) => i !== index && item.date === dateVal);
+      if (isDuplicate) {
+        Swal.showValidationMessage('วันหยุดนี้มีอยู่ในระบบแล้ว');
+        return false;
+      }
+      return { date: dateVal, name: nameVal };
+    }
+  }).then((result) => {
+    if (result.isConfirmed && result.value) {
+      holidays[index] = { date: result.value.date, name: result.value.name };
+      holidays.sort((a, b) => a.date.localeCompare(b.date));
+      saveHolidays(holidays);
+      renderHolidayTable();
+      if (currentActiveView === 'dashboard') renderDashboard();
+      Swal.fire({
+        icon: 'success',
+        title: 'แก้ไขวันหยุดเรียบร้อย',
+        timer: 1500,
+        showConfirmButton: false
+      });
+    }
   });
 }
 
@@ -1856,8 +2258,13 @@ function handleAddHoliday(event) {
   holidays.push({ date, name });
   holidays.sort((a, b) => a.date.localeCompare(b.date));
   saveHolidays(holidays);
-
-  document.getElementById('holidayDateInput').value = '';
+  // Reset holidayDateInput to today by destroying and recreating flatpickr
+  const dateInput = document.getElementById('holidayDateInput');
+  if (dateInput) {
+    if (dateInput._flatpickr) dateInput._flatpickr.destroy();
+    dateInput.value = toISO(new Date());
+    attachThaiDatePicker(dateInput);
+  }
   document.getElementById('holidayNameInput').value = '';
   renderHolidayTable();
   if (currentActiveView === 'dashboard') renderDashboard();
@@ -2367,18 +2774,17 @@ function attachThaiDatePicker(target) {
     } catch (e) {}
   }
 
+  const realToday = new Date();
   if (!target.value) {
-    target.value = toISO(new Date());
+    target.value = toISO(realToday);
   }
-
-  const initialDate = target.value ? target.value : new Date();
 
   const fp = flatpickr(target, {
     locale: localeObj,
     dateFormat: 'Y-m-d',
     altInput: true,
     altFormat: 'j F Y',
-    defaultDate: initialDate,
+    defaultDate: target.value || realToday,
     allowInput: true,
     formatDate: function(date, formatStr, locale) {
       if (formatStr === 'j F Y') {
@@ -2392,7 +2798,7 @@ function attachThaiDatePicker(target) {
     },
     onReady: function(selectedDates, dateStr, instance) {
       if (!selectedDates || selectedDates.length === 0) {
-        instance.setDate(initialDate || new Date(), true);
+        instance.setDate(new Date(), true);
       }
       convertFlatpickrHeaderToBE(instance);
     },
@@ -2404,14 +2810,14 @@ function attachThaiDatePicker(target) {
     },
     onOpen: function(selectedDates, dateStr, instance) {
       if (!selectedDates || selectedDates.length === 0) {
-        instance.setDate(initialDate || new Date(), true);
+        instance.setDate(new Date(), true);
       }
       convertFlatpickrHeaderToBE(instance);
     }
   });
 
   if (fp && (!fp.selectedDates || fp.selectedDates.length === 0)) {
-    fp.setDate(initialDate, true);
+    fp.setDate(realToday, true);
   }
 
   return fp;
@@ -2430,10 +2836,14 @@ function convertFlatpickrHeaderToBE(instance) {
 function setThaiDatePickerValue(elementId, dateVal) {
   const el = document.getElementById(elementId);
   if (!el) return;
-  const isoStr = toISO(dateVal || new Date());
+  const targetDate = dateVal || new Date();
+  const isoStr = toISO(targetDate);
   el.value = isoStr;
   if (el._flatpickr) {
-    el._flatpickr.setDate(isoStr, true);
+    el._flatpickr.setDate(targetDate, true);
+    if (typeof el._flatpickr.jumpToDate === 'function') {
+      el._flatpickr.jumpToDate(targetDate);
+    }
   }
 }
 
@@ -2453,6 +2863,10 @@ function initThaiDatePickers() {
 }
 
 function openModal(modalId) {
+  // Auto-close SweetAlert on mobile screens (< 768px)
+  if (window.innerWidth < 768 && typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) {
+    Swal.close();
+  }
   const el = document.getElementById(modalId);
   if (el) el.classList.add('active');
   setTimeout(initThaiDatePickers, 50);
@@ -2525,26 +2939,60 @@ function openMobileCaseActionModal(caseNumber) {
   if (currentUser && currentUser.role === 'police') {
     if (!enriched.officer && enriched.station === currentUser.station) {
       actionButtonsHtml += `
-        <button onclick="Swal.close(); claimForMe('${enriched.caseNumber}');" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
+        <button onclick="Swal.close(); claimForMe('${enriched.caseNumber}', event);" type="button" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
           <i class="fa-solid fa-hand-holding-hand"></i> รับเป็นเจ้าของคดี
         </button>
       `;
     }
     if (enriched.officer === currentUser.username && !enriched.closed) {
-      const timeCheck = checkTimeWindow();
+      const isDownloaded = !!enriched.downloaded;
       const isPast = isPastCutoff(enriched.filingDeadline);
-      if (timeCheck.allowed && !isPast) {
+
+      // Preview PDF button if file exists
+      if (enriched.fileName) {
         actionButtonsHtml += `
-          <button onclick="Swal.close(); openUploadModal('${enriched.caseNumber}');" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
-            <i class="fa-solid fa-upload"></i> ${enriched.fileName ? 'อัพโหลดไฟล์ใหม่ทับ' : 'อัพโหลด PDF'}
+          <button onclick="Swal.close(); previewPdfFile('${enriched.caseNumber}', event);" type="button" class="btn-secondary" style="width: 100%; background-color: #0284c7; border-color: #0284c7; color: #fff; margin-bottom: 0.5rem;">
+            <i class="fa-solid fa-file-pdf"></i> Preview file PDF (${enriched.fileName})
           </button>
         `;
-        if (!enriched.history || enriched.history.length === 0) {
+      }
+
+      if (isPast) {
+        actionButtonsHtml += `
+          <div style="font-size: 0.8rem; color: #dc2626; text-align: center; font-weight: 600; padding: 0.5rem; background: #fee2e2; border-radius: 0.5rem; margin-bottom: 0.5rem;">
+            <i class="fa-solid fa-ban"></i> เลยเวลา 16.00 น. ต้องยื่นที่ศาลด้วยตนเอง
+          </div>
+        `;
+      } else {
+        const uploadLabel = enriched.fileName ? 'อัพโหลดไฟล์ใหม่ทับ' : 'อัพโหลด PDF';
+        if (isDownloaded) {
           actionButtonsHtml += `
-            <button onclick="Swal.close(); openReturnModal('${enriched.caseNumber}');" class="btn-secondary" style="width: 100%; background-color: #d97706; border-color: #d97706; color: #fff; margin-bottom: 0.5rem;">
-              <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
+            <button disabled type="button" class="btn-primary" style="width: 100%; opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8; margin-bottom: 0.5rem;" title="ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถอัพโหลดทับได้">
+              <i class="fa-solid fa-upload"></i> ${uploadLabel} (ศาลดาวน์โหลดแล้ว)
             </button>
           `;
+        } else {
+          actionButtonsHtml += `
+            <button onclick="Swal.close(); openUploadModal('${enriched.caseNumber}');" type="button" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
+              <i class="fa-solid fa-upload"></i> ${uploadLabel}
+            </button>
+          `;
+        }
+
+        if (!enriched.history || enriched.history.length === 0) {
+          if (isDownloaded) {
+            actionButtonsHtml += `
+              <button disabled type="button" class="btn-secondary" style="width: 100%; background-color: #cbd5e1; border-color: #cbd5e1; color: #94a3b8; opacity: 0.55; cursor: not-allowed; margin-bottom: 0.5rem;" title="ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถคืนสำนวนได้">
+                <i class="fa-solid fa-rotate-left"></i> คืนสำนวน (ศาลดาวน์โหลดแล้ว)
+              </button>
+            `;
+          } else {
+            actionButtonsHtml += `
+              <button onclick="Swal.close(); openReturnModal('${enriched.caseNumber}');" type="button" class="btn-secondary" style="width: 100%; background-color: #d97706; border-color: #d97706; color: #fff; margin-bottom: 0.5rem;">
+                <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
+              </button>
+            `;
+          }
         }
       }
     }
