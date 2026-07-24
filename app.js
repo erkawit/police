@@ -825,23 +825,41 @@ function handleLogout() {
   showLoginView();
 }
 
+function setElementDisplay(id, displayVal) {
+  const el = document.getElementById(id);
+  if (el) el.style.display = displayVal;
+}
+
+function setElementText(id, textVal) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = textVal;
+}
+
+function setElementClass(id, className, isAdd) {
+  const el = document.getElementById(id);
+  if (el) {
+    if (isAdd) el.classList.add(className);
+    else el.classList.remove(className);
+  }
+}
+
 function showLoginView() {
-  document.getElementById('loginView').style.display = 'flex';
-  document.getElementById('appHeader').style.display = 'none';
-  document.getElementById('appLayoutContainer').style.display = 'none';
+  setElementDisplay('loginView', 'flex');
+  setElementDisplay('appHeader', 'none');
+  setElementDisplay('appLayoutContainer', 'none');
 }
 
 function renderAppLayout() {
   if (!currentUser) return;
 
-  document.getElementById('loginView').style.display = 'none';
-  document.getElementById('appHeader').style.display = 'flex';
-  document.getElementById('appLayoutContainer').style.display = 'flex';
+  setElementDisplay('loginView', 'none');
+  setElementDisplay('appHeader', 'flex');
+  setElementDisplay('appLayoutContainer', 'flex');
 
-  document.getElementById('userName').textContent = currentUser.name || '';
-  
+  setElementText('userName', currentUser.name || '');
+
   const roleNames = { admin: 'ผู้ดูแลระบบ', officer: 'เจ้าหน้าที่ศาล', police: 'พนักงานสอบสวน' };
-  document.getElementById('userRoleBadge').textContent = roleNames[currentUser.role] || currentUser.role;
+  setElementText('userRoleBadge', roleNames[currentUser.role] || currentUser.role);
 
   // Theme styling
   if (currentUser.role === 'police') {
@@ -851,32 +869,26 @@ function renderAppLayout() {
   }
 
   // Setup Sidebar Menus based on Role
-  document.getElementById('navCategoryCourt').style.display = (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none';
-  document.getElementById('navItemCreateBatch').style.display = (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none';
-  document.getElementById('navItemHolidays').style.display = (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none';
+  setElementDisplay('navCategoryCourt', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none');
+  setElementDisplay('navItemCreateBatch', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none');
+  setElementDisplay('navItemHolidays', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none');
 
-  document.getElementById('navCategoryPolice').style.display = (currentUser.role === 'police') ? 'block' : 'none';
-  document.getElementById('navItemStationInbox').style.display = (currentUser.role === 'police') ? 'block' : 'none';
-  document.getElementById('navItemDownloadICS').style.display = (currentUser.role === 'police') ? 'block' : 'none';
+  setElementDisplay('navCategoryPolice', (currentUser.role === 'police') ? 'block' : 'none');
+  setElementDisplay('navItemStationInbox', (currentUser.role === 'police') ? 'block' : 'none');
+  setElementDisplay('navItemDownloadICS', (currentUser.role === 'police') ? 'block' : 'none');
 
-  document.getElementById('navCategoryAdmin').style.display = (currentUser.role === 'admin') ? 'block' : 'none';
-  document.getElementById('navItemUsers').style.display = (currentUser.role === 'admin') ? 'block' : 'none';
-  document.getElementById('navItemGoogleSettings').style.display = (currentUser.role === 'admin') ? 'block' : 'none';
+  setElementDisplay('navCategoryAdmin', (currentUser.role === 'admin') ? 'block' : 'none');
+  setElementDisplay('navItemUsers', (currentUser.role === 'admin') ? 'block' : 'none');
+  setElementDisplay('navItemGoogleSettings', (currentUser.role === 'admin') ? 'block' : 'none');
 
   // Setup Mobile Bottom Nav items based on Role
-  const mbQuick = document.getElementById('mbNavQuickUpload');
-  const mbInbox = document.getElementById('mbNavInbox');
-  const mbAdmin = document.getElementById('mbNavAdmin');
-
-  if (mbQuick) mbQuick.style.display = (currentUser.role === 'police') ? 'flex' : 'none';
-  if (mbInbox) mbInbox.style.display = (currentUser.role === 'police') ? 'flex' : 'none';
-  if (mbAdmin) mbAdmin.style.display = (currentUser.role === 'admin') ? 'flex' : 'none';
+  setElementDisplay('mbNavQuickUpload', (currentUser.role === 'police') ? 'flex' : 'none');
+  setElementDisplay('mbNavInbox', (currentUser.role === 'police') ? 'flex' : 'none');
+  setElementDisplay('mbNavCreateBatch', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'flex' : 'none');
+  setElementDisplay('mbNavAdmin', (currentUser.role === 'admin') ? 'flex' : 'none');
 
   // Control Sync Button Visibility (Admin only)
-  const btnSync = document.getElementById('btnSyncGoogleSheet');
-  if (btnSync) {
-    btnSync.style.display = (currentUser.role === 'admin') ? 'inline-flex' : 'none';
-  }
+  setElementDisplay('btnSyncGoogleSheet', (currentUser.role === 'admin') ? 'inline-flex' : 'none');
 
   // Restore Last Active View on Refresh
   const hashView = (window.location.hash || '').replace('#', '').trim();
@@ -905,52 +917,47 @@ function switchView(viewName, event, subTab) {
     // Ignore origin frame navigation warnings on file://
   }
 
-  document.getElementById('dashboardView').style.display = 'none';
-  document.getElementById('requestsView').style.display = 'none';
-  document.getElementById('adminView').style.display = 'none';
+  setElementDisplay('dashboardView', 'none');
+  setElementDisplay('requestsView', 'none');
+  setElementDisplay('adminView', 'none');
 
-  document.getElementById('navItemDashboard').classList.remove('active');
-  document.getElementById('navItemRequests').classList.remove('active');
-  if (document.getElementById('navItemUsersLink')) document.getElementById('navItemUsersLink').classList.remove('active');
+  setElementClass('navItemDashboard', 'active', false);
+  setElementClass('navItemRequests', 'active', false);
+  setElementClass('navItemUsersLink', 'active', false);
 
   // Clear Mobile Bottom Nav Active Classes
-  ['mbNavDashboard', 'mbNavRequests', 'mbNavQuickUpload', 'mbNavInbox', 'mbNavAdmin'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.classList.remove('active');
+  ['mbNavDashboard', 'mbNavRequests', 'mbNavQuickUpload', 'mbNavInbox', 'mbNavCreateBatch', 'mbNavAdmin'].forEach(id => {
+    setElementClass(id, 'active', false);
   });
 
   if (viewName === 'dashboard') {
-    document.getElementById('dashboardView').style.display = 'block';
-    document.getElementById('navItemDashboard').classList.add('active');
-    const mbDash = document.getElementById('mbNavDashboard');
-    if (mbDash) mbDash.classList.add('active');
+    setElementDisplay('dashboardView', 'block');
+    setElementClass('navItemDashboard', 'active', true);
+    setElementClass('mbNavDashboard', 'active', true);
     renderDashboard();
   } else if (viewName === 'requests') {
-    document.getElementById('requestsView').style.display = 'block';
-    document.getElementById('navItemRequests').classList.add('active');
+    setElementDisplay('requestsView', 'block');
+    setElementClass('navItemRequests', 'active', true);
     
     if (subTab === 'inbox') {
-      const mbInb = document.getElementById('mbNavInbox');
-      if (mbInb) mbInb.classList.add('active');
+      setElementClass('mbNavInbox', 'active', true);
     } else {
-      const mbReq = document.getElementById('mbNavRequests');
-      if (mbReq) mbReq.classList.add('active');
+      setElementClass('mbNavRequests', 'active', true);
     }
 
     if (currentUser && currentUser.role === 'police') {
-      document.getElementById('policeRequestsSection').style.display = 'block';
-      document.getElementById('courtRequestsSection').style.display = 'none';
+      setElementDisplay('policeRequestsSection', 'block');
+      setElementDisplay('courtRequestsSection', 'none');
       renderPoliceView();
     } else {
-      document.getElementById('policeRequestsSection').style.display = 'none';
-      document.getElementById('courtRequestsSection').style.display = 'block';
+      setElementDisplay('policeRequestsSection', 'none');
+      setElementDisplay('courtRequestsSection', 'block');
       renderCourtView();
     }
   } else if (viewName === 'admin') {
-    document.getElementById('adminView').style.display = 'block';
-    if (document.getElementById('navItemUsersLink')) document.getElementById('navItemUsersLink').classList.add('active');
-    const mbAdm = document.getElementById('mbNavAdmin');
-    if (mbAdm) mbAdm.classList.add('active');
+    setElementDisplay('adminView', 'block');
+    setElementClass('navItemUsersLink', 'active', true);
+    setElementClass('mbNavAdmin', 'active', true);
     renderAdminView();
   }
 }
@@ -1140,7 +1147,7 @@ function openDayDetailModal(dayISO) {
 function renderPoliceView() {
   if (!currentUser) return;
   startLiveClock();
-  document.getElementById('policeStationSub').textContent = `สังกัด: ${currentUser.station || 'ไม่ระบุ'}`;
+  setElementText('policeStationSub', `สังกัด: ${currentUser.station || 'ไม่ระบุ'}`);
 
   const rawRequests = getRequests();
   const holidays = getHolidays();
@@ -2384,6 +2391,9 @@ function attachThaiDatePicker(target) {
       return flatpickr.formatDate(date, formatStr, locale);
     },
     onReady: function(selectedDates, dateStr, instance) {
+      if (!selectedDates || selectedDates.length === 0) {
+        instance.setDate(initialDate || new Date(), true);
+      }
       convertFlatpickrHeaderToBE(instance);
     },
     onMonthChange: function(selectedDates, dateStr, instance) {
@@ -2393,6 +2403,9 @@ function attachThaiDatePicker(target) {
       convertFlatpickrHeaderToBE(instance);
     },
     onOpen: function(selectedDates, dateStr, instance) {
+      if (!selectedDates || selectedDates.length === 0) {
+        instance.setDate(initialDate || new Date(), true);
+      }
       convertFlatpickrHeaderToBE(instance);
     }
   });
