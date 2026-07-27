@@ -828,11 +828,19 @@ function setElementDisplay(id, displayVal) {
   const el = document.getElementById(id);
   if (el) el.style.display = displayVal;
 }
+window.setElementDisplay = setElementDisplay;
 
 function setElementText(id, textVal) {
   const el = document.getElementById(id);
   if (el) el.textContent = textVal;
 }
+window.setElementText = setElementText;
+
+function setElementValue(id, val) {
+  const el = document.getElementById(id);
+  if (el) el.value = val;
+}
+window.setElementValue = setElementValue;
 
 function setElementClass(id, className, isAdd) {
   const el = document.getElementById(id);
@@ -841,6 +849,7 @@ function setElementClass(id, className, isAdd) {
     else el.classList.remove(className);
   }
 }
+window.setElementClass = setElementClass;
 
 function showLoginView() {
   setElementDisplay('loginView', 'flex');
@@ -1036,20 +1045,20 @@ function renderDashboard() {
   const enrichedCases = rawRequests.map(r => enrichCase(r, holidays));
 
   let filteredCases = enrichedCases;
-  if (currentUser.role === 'police') {
+  if (currentUser && currentUser.role === 'police') {
     filteredCases = enrichedCases.filter(c => c.officer === currentUser.username || c.station === currentUser.station);
-    document.getElementById('dashboardSubtitle').textContent = `ติดตามกำหนดเวลาสำหรับ สภ.: ${currentUser.station || 'ไม่ระบุ'}`;
+    setElementText('dashboardSubtitle', `ติดตามกำหนดเวลาสำหรับ สภ.: ${currentUser.station || 'ไม่ระบุ'}`);
   } else {
-    document.getElementById('dashboardSubtitle').textContent = `คำนวณวันยื่นล่วงหน้า 1 วันทำการและเวลาตัดยื่น 16.00 น. ตามระเบียบศาลจังหวัดอุดรธานี พ.ศ. 2569`;
+    setElementText('dashboardSubtitle', `คำนวณวันยื่นล่วงหน้า 1 วันทำการและเวลาตัดยื่น 16.00 น. ตามระเบียบศาลจังหวัดอุดรธานี พ.ศ. 2569`);
   }
 
-  document.getElementById('dashStatTotal').textContent = filteredCases.length;
+  setElementText('dashStatTotal', filteredCases.length);
   
   const dueCases = filteredCases.filter(c => !c.closed && (c.status === 'due' || c.status === 'overdue'));
-  document.getElementById('dashStatDue').textContent = dueCases.length;
+  setElementText('dashStatDue', dueCases.length);
 
   const downloadedCases = filteredCases.filter(c => c.status === 'downloaded' || c.closed);
-  document.getElementById('dashStatDownloaded').textContent = downloadedCases.length;
+  setElementText('dashStatDownloaded', downloadedCases.length);
 
   renderCalendar(filteredCases);
   renderMobileTodayList(filteredCases);
@@ -1066,16 +1075,18 @@ function changeMonth(offset) {
 }
 
 function renderCalendar(cases) {
+  const gridContainer = document.getElementById('calendarGridDays');
+  if (!gridContainer) return;
+
   const year = currentDate.getFullYear();
   const month = currentDate.getMonth();
 
   const thaiYear = year < 2400 ? year + 543 : year;
-  document.getElementById('calendarMonthTitle').textContent = `${THAI_MONTHS_FULL[month]} ${thaiYear}`;
+  setElementText('calendarMonthTitle', `${THAI_MONTHS_FULL[month]} ${thaiYear}`);
 
   const firstDay = new Date(year, month, 1).getDay();
   const totalDays = new Date(year, month + 1, 0).getDate();
 
-  const gridContainer = document.getElementById('calendarGridDays');
   gridContainer.innerHTML = '';
 
   // Blank padding days
@@ -1171,17 +1182,80 @@ function openDayDetailModal(dayISO) {
   const enriched = rawRequests.map(r => enrichCase(r, holidays));
 
   let filtered = enriched.filter(c => c.filingDeadline === dayISO || c.legalDeadline === dayISO);
-  if (currentUser.role === 'police') {
-    filtered = filtered.filter(c => c.station === currentUser.station);
+  if (currentUser && currentUser.role === 'police') {
+    filtered = filtered.filter(c => c.station === currentUser.station || c.officer === currentUser.username);
   }
 
-  document.getElementById('dayDetailTitle').textContent = `รายการคำร้องประจำวันที่ ${formatThaiDate(dayISO, true)}`;
-  const tbody = document.getElementById('dayDetailTableBody');
-  tbody.innerHTML = '';
+  const dateTitle = formatThaiDate(dayISO, true);
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">ไม่มีรายการคำร้องในวันนี้</td></tr>`;
-  } else {
+    Swal.fire({
+      icon: 'info',
+      title: `<i class="fa-solid fa-calendar-day" style="color: var(--primary);"></i> ประจำวันที่ ${dateTitle}`,
+      html: `<div style="font-size: 0.95rem; color: #475569; padding: 0.5rem 0;">ไม่มีรายการคำร้องผัดฟ้องฝากขังในวันนี้</div>`,
+      confirmButtonText: 'ตกลง',
+      confirmButtonColor: '#1e3a8a'
+    });
+    return;
+  }
+
+  let rowsHtml = filtered.map(c => {
+    const typeBadge = c.type === 'ยฝ.' ? '<span class="badge badge-type-yf">ยฝ.</span>' : '<span class="badge badge-type-f">ฝ.</span>';
+    const pdfBtn = c.fileName ? `
+      <button onclick="Swal.close(); previewPdfFile('${c.caseNumber}', event);" type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; background-color: #0284c7; border-color: #0284c7; color: #fff; width: auto;">
+        <i class="fa-solid fa-file-pdf"></i> ไฟล์ PDF
+      </button>
+    ` : '-';
+
+    return `
+      <tr style="border-bottom: 1px solid #f1f5f9;">
+        <td style="padding: 0.6rem 0.4rem;">${typeBadge}</td>
+        <td style="padding: 0.6rem 0.4rem;"><b>${c.caseNumber}</b></td>
+        <td style="padding: 0.6rem 0.4rem;">${c.station || 'รอกำหนด'}</td>
+        <td style="padding: 0.6rem 0.4rem;">ครั้งที่ ${c.k}</td>
+        <td style="padding: 0.6rem 0.4rem;"><b style="color: #b45309;">${formatThaiDate(c.legalDeadline)}</b></td>
+        <td style="padding: 0.6rem 0.4rem;">${renderStatusBadge(c.status)}</td>
+        <td style="padding: 0.6rem 0.4rem;">${pdfBtn}</td>
+      </tr>
+    `;
+  }).join('');
+
+  const tableHtml = `
+    <div style="max-height: 360px; overflow-y: auto; text-align: left; margin-top: 0.5rem;">
+      <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+        <thead>
+          <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">
+            <th style="padding: 0.5rem 0.4rem;">ประเภท</th>
+            <th style="padding: 0.5rem 0.4rem;">เลขฝากขัง</th>
+            <th style="padding: 0.5rem 0.4rem;">สภ.</th>
+            <th style="padding: 0.5rem 0.4rem;">ครั้งที่</th>
+            <th style="padding: 0.5rem 0.4rem;">ครบกำหนด</th>
+            <th style="padding: 0.5rem 0.4rem;">สถานะ</th>
+            <th style="padding: 0.5rem 0.4rem;">เอกสาร</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsHtml}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  Swal.fire({
+    title: `<i class="fa-solid fa-calendar-day" style="color: var(--primary);"></i> รายการคำร้องประจำวันที่ ${dateTitle}`,
+    html: tableHtml,
+    width: window.innerWidth < 768 ? '95%' : '680px',
+    showConfirmButton: true,
+    confirmButtonText: 'ปิดหน้าต่าง',
+    confirmButtonColor: '#1e3a8a'
+  });
+
+  // Safe fallback for legacy modal if elements happen to exist
+  const titleEl = document.getElementById('dayDetailTitle');
+  if (titleEl) titleEl.textContent = `รายการคำร้องประจำวันที่ ${dateTitle}`;
+  const tbody = document.getElementById('dayDetailTableBody');
+  if (tbody) {
+    tbody.innerHTML = '';
     filtered.forEach(c => {
       const typeBadge = c.type === 'ยฝ.' ? '<span class="badge badge-type-yf">ยฝ.</span>' : '<span class="badge badge-type-f">ฝ.</span>';
       const tr = document.createElement('tr');
@@ -1192,16 +1266,14 @@ function openDayDetailModal(dayISO) {
         <td>ครั้งที่ ${c.k}</td>
         <td>${formatThaiDate(c.legalDeadline)}</td>
         <td>${renderStatusBadge(c.status)}</td>
-        <td>
-          ${c.fileName ? `<a href="${c.fileUrl || '#'}" target="_blank" class="btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;"><i class="fa-solid fa-file-pdf"></i> เปิดไฟล์</a>` : '-'}
-        </td>
+        <td>${c.fileName ? `<button onclick="previewPdfFile('${c.caseNumber}', event)" class="btn-secondary" style="padding: 0.2rem 0.5rem; font-size: 0.75rem;"><i class="fa-solid fa-file-pdf"></i> เปิดไฟล์</button>` : '-'}</td>
       `;
       tbody.appendChild(tr);
     });
+    openModal('dayDetailModal');
   }
-
-  openModal('dayDetailModal');
 }
+window.openDayDetailModal = openDayDetailModal;
 
 // --------------------------------------------------------------------------
 // 8. POLICE WORKFLOW & STATION INBOX
@@ -1312,41 +1384,42 @@ function renderPoliceTable() {
       if (!c.closed) {
         const isDownloaded = !!c.downloaded;
         const isPast = isPastCutoff(c.filingDeadline);
+        const isClosedTime = isPast || !timeCheck.isOpen;
 
         if (c.fileName) {
+          // File HAS been uploaded -> Show Preview PDF + disabled/enabled re-upload & return
           actionButtons += `
             <button onclick="previewPdfFile('${c.caseNumber}', event)" type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #0284c7; border-color: #0284c7; color: #fff; margin-right: 0.3rem;" title="ดูตัวอย่างไฟล์ PDF">
               <i class="fa-solid fa-file-pdf"></i> Preview PDF
             </button>
           `;
-        }
 
-        if (isPast) {
-          actionButtons += `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 600;"><i class="fa-solid fa-ban"></i> เลย 16.00 น. ต้องยื่นที่ศาลด้วยตนเอง</span>`;
-        } else {
-          const uploadLabel = c.fileName ? 'อัพโหลดไฟล์ใหม่ทับ' : 'อัพโหลด PDF';
-          if (isDownloaded) {
+          const canReupload = !isDownloaded && !isClosedTime;
+          actionButtons += `
+            <button ${canReupload ? `onclick="openUploadModal('${c.caseNumber}')"` : 'disabled'} type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; ${canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8;'}" title="${isDownloaded ? 'ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถอัพโหลดทับได้' : (isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : '')}">
+              <i class="fa-solid fa-upload"></i> อัพโหลดไฟล์ใหม่ทับ
+            </button>
+          `;
+
+          if (!c.history || c.history.length === 0) {
+            const canReturn = !isDownloaded && !isClosedTime;
             actionButtons += `
-              <button disabled type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8;" title="ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถอัพโหลดทับได้">
-                <i class="fa-solid fa-upload"></i> ${uploadLabel}
-              </button>
-            `;
-          } else {
-            actionButtons += `
-              <button onclick="openUploadModal('${c.caseNumber}')" type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto;">
-                <i class="fa-solid fa-upload"></i> ${uploadLabel}
+              <button ${canReturn ? `onclick="openReturnModal('${c.caseNumber}')"` : 'disabled'} type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; ${canReturn ? 'background-color: #d97706; border-color: #d97706; color: #fff;' : 'background-color: #cbd5e1; border-color: #cbd5e1; color: #94a3b8; opacity: 0.55; cursor: not-allowed;'} margin-left: 0.3rem;" title="${isDownloaded ? 'ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว' : (isClosedTime ? 'เลยเวลา 16.00 น.' : '')}">
+                <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
               </button>
             `;
           }
-
-          if (!c.history || c.history.length === 0) {
-            if (isDownloaded) {
-              actionButtons += `
-                <button disabled type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #cbd5e1; border-color: #cbd5e1; color: #94a3b8; opacity: 0.55; cursor: not-allowed; margin-left: 0.3rem;" title="ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถคืนสำนวนได้">
-                  <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
-                </button>
-              `;
-            } else {
+        } else {
+          // File has NOT been uploaded yet -> Show red warning ONLY if time is closed
+          if (isClosedTime) {
+            actionButtons += `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 700;"><i class="fa-solid fa-ban"></i> เลย 16.00 น. ยื่นที่ศาลด้วยตนเอง</span>`;
+          } else {
+            actionButtons += `
+              <button onclick="openUploadModal('${c.caseNumber}')" type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto;">
+                <i class="fa-solid fa-upload"></i> อัพโหลด PDF
+              </button>
+            `;
+            if (!c.history || c.history.length === 0) {
               actionButtons += `
                 <button onclick="openReturnModal('${c.caseNumber}')" type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #d97706; border-color: #d97706; color: #fff; margin-left: 0.3rem;">
                   <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
@@ -1444,6 +1517,28 @@ function openUploadModal(caseNumber) {
   const c = requests.find(r => r.caseNumber === caseNumber);
   if (!c) return;
 
+  const timeCheck = checkTimeWindow();
+  const isPast = isPastCutoff(c.filingDeadline);
+
+  if (!timeCheck.isOpen || isPast) {
+    const timeReason = !timeCheck.isOpen 
+      ? timeCheck.reason 
+      : `เลยเวลา 16.00 น. ของวันครบกำหนดผัดฟ้องฝากขังในระบบแล้ว (${formatThaiDate(c.filingDeadline)})`;
+
+    Swal.fire({
+      icon: 'warning',
+      title: 'ไม่สามารถอัพโหลดไฟล์ได้',
+      html: `<div style="text-align: left; font-size: 0.9rem; color: #334155; line-height: 1.6;">
+              <p style="color: #dc2626; font-weight: 700; margin-bottom: 0.5rem;"><i class="fa-solid fa-clock"></i> เกินเวลาที่ระบบเปิดรับยื่นคำร้องทางออนไลน์</p>
+              <p style="margin-bottom: 0.5rem;">${timeReason}</p>
+              <p style="color: #b45309; font-weight: 600;">* ท่านต้องนำเอกสารคำร้องยื่นผัดฟ้องฝากขังไปยื่นต่อศาลด้วยตนเองเท่านั้น</p>
+             </div>`,
+      confirmButtonText: 'รับทราบ',
+      confirmButtonColor: '#1e3a8a'
+    });
+    return;
+  }
+
   if (c.downloaded) {
     Swal.fire({
       icon: 'warning',
@@ -1453,15 +1548,19 @@ function openUploadModal(caseNumber) {
     return;
   }
 
-  document.getElementById('uploadCaseNumber').value = c.caseNumber;
-  document.getElementById('uploadCaseNumberDisplay').textContent = `เลขคดี: ${c.caseNumber}`;
-  document.getElementById('uploadCaseInfoDisplay').textContent = `ครั้งที่ ${c.k} | สภ.: ${c.station || 'ไม่ระบุ'}`;
+  setElementValue('uploadCaseNumber', c.caseNumber);
+  setElementText('uploadCaseNumberDisplay', `เลขคดี: ${c.caseNumber}`);
+  setElementText('uploadCaseInfoDisplay', `ครั้งที่ ${c.k} | สภ.: ${c.station || 'ไม่ระบุ'}`);
 
   selectedFile = null;
-  document.getElementById('pdfFileInput').value = '';
-  document.getElementById('dropzoneText').textContent = 'คลิก หรือ ลากไฟล์ PDF มาวางที่นี่';
-  document.getElementById('pdfValidationStatus').style.display = 'none';
-  document.getElementById('submitRequestBtn').disabled = true;
+  setElementValue('pdfFileInput', '');
+  setElementText('dropzoneText', 'คลิก หรือ ลากไฟล์ PDF มาวางที่นี่');
+
+  const statusDiv = document.getElementById('pdfValidationStatus');
+  if (statusDiv) statusDiv.style.display = 'none';
+
+  const submitBtn = document.getElementById('submitRequestBtn');
+  if (submitBtn) submitBtn.disabled = true;
 
   openModal('addRequestModal');
 }
@@ -1470,16 +1569,43 @@ function triggerMobileQuickUpload(event) {
   if (event) event.preventDefault();
   if (!currentUser) return;
 
+  const timeCheck = checkTimeWindow();
+  if (!timeCheck.isOpen) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'ระบบปิดรับยื่นคำร้องในขณะนี้',
+      html: `<div style="text-align: left; font-size: 0.9rem; color: #334155; line-height: 1.6;">
+              <p style="color: #dc2626; font-weight: 700; margin-bottom: 0.5rem;"><i class="fa-solid fa-clock"></i> นอกช่วงเวลาเปิดรับคำร้องออนไลน์ (08:30 - 16:00 น. วันจันทร์ - ศุกร์)</p>
+              <p style="margin-bottom: 0.5rem;">${timeCheck.reason}</p>
+              <p style="color: #b45309; font-weight: 600;">* ท่านต้องนำเอกสารคำร้องยื่นผัดฟ้องฝากขังไปยื่นต่อศาลด้วยตนเองเท่านั้น</p>
+             </div>`,
+      confirmButtonText: 'รับทราบ',
+      confirmButtonColor: '#1e3a8a'
+    });
+    return;
+  }
+
   const rawRequests = getRequests();
   const holidays = getHolidays();
   const enriched = rawRequests.map(r => enrichCase(r, holidays));
 
-  // Find cases for police officer station that need upload
+  // Find cases for police officer station that need upload and NOT past cutoff and NOT downloaded
   let pendingCases = enriched.filter(c => 
     (!c.closed) && 
     (!c.fileName || c.courtFlag) && 
+    !c.downloaded &&
+    !isPastCutoff(c.filingDeadline) &&
     (currentUser.role === 'police' ? (c.officer === currentUser.username || c.station === currentUser.station) : true)
   );
+
+  if (pendingCases.length === 0) {
+    Swal.fire({
+      icon: 'info',
+      title: 'ไม่พบรายการคดีที่สามารถอัพโหลดได้',
+      text: 'ไม่มีรายการคดีที่รออัพโหลด หรือคดีในระบบเลยเวลาตัดยื่น 16.00 น. แล้ว (ต้องนำยื่นศาลด้วยตนเอง)'
+    });
+    return;
+  }
 
   if (pendingCases.length === 1) {
     openUploadModal(pendingCases[0].caseNumber);
@@ -1580,9 +1706,22 @@ function handleCreateRequest(event) {
 
   if (index === -1) return;
 
+  const timeCheck = checkTimeWindow();
+  const targetCase = requests[index];
+  const isPast = targetCase ? isPastCutoff(targetCase.filingDeadline) : false;
+
+  if (!timeCheck.isOpen || isPast) {
+    closeModal('addRequestModal');
+    Swal.fire({
+      icon: 'error',
+      title: 'ไม่สามารถอัพโหลดไฟล์ได้',
+      text: 'ขณะนี้เลยเวลา 16.00 น. หรืออยู่นอกช่วงเวลาเปิดรับยื่นคำร้องออนไลน์ กรุณานำเอกสารยื่นต่อศาลด้วยตนเอง'
+    });
+    return;
+  }
+
   const scriptUrl = localStorage.getItem('eredt_google_script');
   const driveFolderId = localStorage.getItem('eredt_drive_folder') || DEFAULT_DRIVE_FOLDER_ID;
-  const targetCase = requests[index];
 
   Swal.fire({
     title: 'กำลังอัพโหลดคำร้องไป Google Drive...',
@@ -2034,11 +2173,11 @@ function openReceiveModal(caseNumber) {
   const c = requests.find(r => r.caseNumber === caseNumber);
   if (!c) return;
 
-  document.getElementById('receiveCaseNumber').value = c.caseNumber;
-  document.getElementById('receiveCaseNumberDisplay').textContent = `เลขคดี: ${c.caseNumber}`;
-  document.getElementById('receiveCaseInfoDisplay').textContent = `ครั้งที่ ${c.k} | สภ.: ${c.station || 'ไม่ระบุ'}`;
-  document.getElementById('receiveCapSelect').value = c.cap || 84;
-  document.getElementById('receiveActualDaysInput').value = 12;
+  setElementValue('receiveCaseNumber', c.caseNumber);
+  setElementText('receiveCaseNumberDisplay', `เลขคดี: ${c.caseNumber}`);
+  setElementText('receiveCaseInfoDisplay', `ครั้งที่ ${c.k} | สภ.: ${c.station || 'ไม่ระบุ'}`);
+  setElementValue('receiveCapSelect', c.cap || 84);
+  setElementValue('receiveActualDaysInput', 12);
 
   openModal('receiveOccasionModal');
 }
@@ -2432,18 +2571,40 @@ function deleteUser(username) {
 }
 
 function openGoogleSettingsModal(event) {
-  if (event) event.preventDefault();
-  document.getElementById('googleSheetUrlInput').value = localStorage.getItem('eredt_google_csv') || DEFAULT_GOOGLE_SHEET_CSV;
-  document.getElementById('googleScriptUrlInput').value = localStorage.getItem('eredt_google_script') || DEFAULT_GOOGLE_SCRIPT_WEBAPP;
-  document.getElementById('googleDriveFolderInput').value = localStorage.getItem('eredt_drive_folder') || DEFAULT_DRIVE_FOLDER_ID;
+  if (event) {
+    try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
+    try { if (typeof event.stopPropagation === 'function') event.stopPropagation(); } catch (e) {}
+  }
+
+  // Auto-close SweetAlert on mobile screens (< 768px)
+  if (window.innerWidth < 768 && typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) {
+    Swal.close();
+  }
+
+  const csvEl = document.getElementById('googleSheetUrlInput');
+  const scriptEl = document.getElementById('googleScriptUrlInput');
+  const folderEl = document.getElementById('googleDriveFolderInput') || document.getElementById('googleFolderIdInput');
+
+  if (csvEl) csvEl.value = localStorage.getItem('eredt_google_csv') || DEFAULT_GOOGLE_SHEET_CSV;
+  if (scriptEl) scriptEl.value = localStorage.getItem('eredt_google_script') || DEFAULT_GOOGLE_SCRIPT_WEBAPP;
+  if (folderEl) folderEl.value = localStorage.getItem('eredt_drive_folder') || DEFAULT_DRIVE_FOLDER_ID;
+
   openModal('googleSettingsModal');
 }
+window.openGoogleSettingsModal = openGoogleSettingsModal;
 
 function saveGoogleSettings(event) {
-  event.preventDefault();
-  const csvUrl = document.getElementById('googleSheetUrlInput').value.trim();
-  const scriptUrl = document.getElementById('googleScriptUrlInput').value.trim();
-  const driveFolder = document.getElementById('googleDriveFolderInput').value.trim();
+  if (event) {
+    try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
+  }
+
+  const csvEl = document.getElementById('googleSheetUrlInput');
+  const scriptEl = document.getElementById('googleScriptUrlInput');
+  const folderEl = document.getElementById('googleDriveFolderInput') || document.getElementById('googleFolderIdInput');
+
+  const csvUrl = csvEl ? csvEl.value.trim() : '';
+  const scriptUrl = scriptEl ? scriptEl.value.trim() : '';
+  const driveFolder = folderEl ? folderEl.value.trim() : '';
 
   localStorage.setItem('eredt_google_csv', csvUrl);
   localStorage.setItem('eredt_google_script', scriptUrl);
@@ -2452,6 +2613,8 @@ function saveGoogleSettings(event) {
 
   Swal.fire({ icon: 'success', title: 'บันทึกการตั้งค่า Google Services เรียบร้อย', timer: 1500, showConfirmButton: false });
 }
+window.saveGoogleSettings = saveGoogleSettings;
+window.handleSaveGoogleSettings = saveGoogleSettings;
 
 function parseCSV(text) {
   if (!text) return [];
@@ -2947,46 +3110,49 @@ function openMobileCaseActionModal(caseNumber) {
     if (enriched.officer === currentUser.username && !enriched.closed) {
       const isDownloaded = !!enriched.downloaded;
       const isPast = isPastCutoff(enriched.filingDeadline);
+      const timeCheck = checkTimeWindow();
+      const isClosedTime = isPast || !timeCheck.isOpen;
 
-      // Preview PDF button if file exists
       if (enriched.fileName) {
+        // 1. Preview PDF button
         actionButtonsHtml += `
           <button onclick="Swal.close(); previewPdfFile('${enriched.caseNumber}', event);" type="button" class="btn-secondary" style="width: 100%; background-color: #0284c7; border-color: #0284c7; color: #fff; margin-bottom: 0.5rem;">
             <i class="fa-solid fa-file-pdf"></i> Preview file PDF (${enriched.fileName})
           </button>
         `;
-      }
 
-      if (isPast) {
+        // 2. Re-upload button (disabled if downloaded OR closed time)
+        const canReupload = !isDownloaded && !isClosedTime;
         actionButtonsHtml += `
-          <div style="font-size: 0.8rem; color: #dc2626; text-align: center; font-weight: 600; padding: 0.5rem; background: #fee2e2; border-radius: 0.5rem; margin-bottom: 0.5rem;">
-            <i class="fa-solid fa-ban"></i> เลยเวลา 16.00 น. ต้องยื่นที่ศาลด้วยตนเอง
-          </div>
+          <button ${canReupload ? `onclick="Swal.close(); openUploadModal('${enriched.caseNumber}');"` : 'disabled'} type="button" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem; ${canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8;'}" title="${isDownloaded ? 'ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว' : (isClosedTime ? 'เลยเวลา 16.00 น.' : '')}">
+            <i class="fa-solid fa-upload"></i> อัพโหลดไฟล์ใหม่ทับ ${isDownloaded ? '(ศาลดาวน์โหลดแล้ว)' : (isClosedTime ? '(เลยเวลา 16.00 น.)' : '')}
+          </button>
         `;
-      } else {
-        const uploadLabel = enriched.fileName ? 'อัพโหลดไฟล์ใหม่ทับ' : 'อัพโหลด PDF';
-        if (isDownloaded) {
+
+        // 3. Return button (disabled if downloaded OR closed time)
+        if (!enriched.history || enriched.history.length === 0) {
+          const canReturn = !isDownloaded && !isClosedTime;
           actionButtonsHtml += `
-            <button disabled type="button" class="btn-primary" style="width: 100%; opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8; margin-bottom: 0.5rem;" title="ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถอัพโหลดทับได้">
-              <i class="fa-solid fa-upload"></i> ${uploadLabel} (ศาลดาวน์โหลดแล้ว)
+            <button ${canReturn ? `onclick="Swal.close(); openReturnModal('${enriched.caseNumber}');"` : 'disabled'} type="button" class="btn-secondary" style="width: 100%; margin-bottom: 0.5rem; ${canReturn ? 'background-color: #d97706; border-color: #d97706; color: #fff;' : 'background-color: #cbd5e1; border-color: #cbd5e1; color: #94a3b8; opacity: 0.55; cursor: not-allowed;'}" title="${isDownloaded ? 'ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว' : (isClosedTime ? 'เลยเวลา 16.00 น.' : '')}">
+              <i class="fa-solid fa-rotate-left"></i> คืนสำนวน ${isDownloaded ? '(ศาลดาวน์โหลดแล้ว)' : (isClosedTime ? '(เลยเวลา 16.00 น.)' : '')}
             </button>
+          `;
+        }
+      } else {
+        // File has NOT been uploaded yet (!enriched.fileName)
+        if (isClosedTime) {
+          actionButtonsHtml += `
+            <div style="font-size: 0.85rem; color: #dc2626; text-align: center; font-weight: 700; padding: 0.65rem; background: #fee2e2; border-radius: 0.375rem; border: 1px solid #fca5a5; margin-bottom: 0.5rem;">
+              <i class="fa-solid fa-ban"></i> เลย 16.00 น. ยื่นที่ศาลด้วยตนเอง
+            </div>
           `;
         } else {
           actionButtonsHtml += `
             <button onclick="Swal.close(); openUploadModal('${enriched.caseNumber}');" type="button" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
-              <i class="fa-solid fa-upload"></i> ${uploadLabel}
+              <i class="fa-solid fa-upload"></i> อัพโหลด PDF
             </button>
           `;
-        }
-
-        if (!enriched.history || enriched.history.length === 0) {
-          if (isDownloaded) {
-            actionButtonsHtml += `
-              <button disabled type="button" class="btn-secondary" style="width: 100%; background-color: #cbd5e1; border-color: #cbd5e1; color: #94a3b8; opacity: 0.55; cursor: not-allowed; margin-bottom: 0.5rem;" title="ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถคืนสำนวนได้">
-                <i class="fa-solid fa-rotate-left"></i> คืนสำนวน (ศาลดาวน์โหลดแล้ว)
-              </button>
-            `;
-          } else {
+          if (!enriched.history || enriched.history.length === 0) {
             actionButtonsHtml += `
               <button onclick="Swal.close(); openReturnModal('${enriched.caseNumber}');" type="button" class="btn-secondary" style="width: 100%; background-color: #d97706; border-color: #d97706; color: #fff; margin-bottom: 0.5rem;">
                 <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
