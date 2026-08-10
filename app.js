@@ -20,8 +20,9 @@ const DEFAULT_DRIVE_FOLDER_ID = '1l5ZDlXI14lgFc6WGqmZ3kQ9qB-ci-ArM';
 const DAYS_PER_OCCASION = 12; // ป.วิ.อาญา ม.87: ฝากขังได้ครั้งละไม่เกิน 12 วัน
 const FILING_CUTOFF_HOUR = 16; // ข้อ 6: ยื่นทางระบบได้ไม่เกิน 16.00 น.
 const PURGE_DAYS = 60;
+const FILE_PURGE_DAYS = 12; // ไฟล์ PDF ถูกลบอัตโนมัติ 12 วันหลังอัพโหลด (SPEC ข้อ 6)
 const CAP_MAX_K = { 48: 4, 84: 7 };
-const MAX_UPLOAD_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 const ALLOWED_UPLOAD_EXTENSION = ".pdf";
 
 // รายชื่อ 23 สถานีตำรวจในจังหวัดอุดรธานี
@@ -179,7 +180,7 @@ function validateUploadFile(file) {
     return { valid: false, reason: "ไม่สามารถอ่านขนาดไฟล์ได้ กรุณาลองใหม่" };
   }
   if (file.sizeBytes > MAX_UPLOAD_SIZE_BYTES) {
-    return { valid: false, reason: "ไฟล์จะต้องมีขนาดไม่เกิน 5 MB เท่านั้น" };
+    return { valid: false, reason: "ไฟล์จะต้องมีขนาดไม่เกิน 20 MB เท่านั้น" };
   }
   return { valid: true, reason: null };
 }
@@ -201,12 +202,16 @@ function enrichCase(rawCase, holidays, now = new Date()) {
   }
   const cumulativeDays = rawCase.cumulativeDays ?? (12 * ((rawCase.k || 2) - 1));
   const { rawDeadline, legalDeadline, filingDeadline, daysAvailable } = computeOccasionDeadlines(rawCase.startDate, cumulativeDays, holidays);
-  const status = deriveStatus({ ...rawCase, filingDeadline }, now);
-  return { ...rawCase, cumulativeDays, daysAvailable, rawDeadline, legalDeadline, filingDeadline, status };
+  // ไฟล์ PDF ที่อัพโหลดแล้วถูกลบอัตโนมัติ FILE_PURGE_DAYS วันหลังอัพโหลด (SPEC ข้อ 6)
+  const filePurgeDate = rawCase.uploadedAt ? toISO(addDays(fromISO(rawCase.uploadedAt), FILE_PURGE_DAYS)) : null;
+  const fileExpired = Boolean(rawCase.fileName && !rawCase.downloaded && filePurgeDate && daysUntil(filePurgeDate, now) < 0);
+  const status = deriveStatus({ ...rawCase, filingDeadline, fileExpired }, now);
+  return { ...rawCase, cumulativeDays, daysAvailable, rawDeadline, legalDeadline, filingDeadline, filePurgeDate, fileExpired, status };
 }
 
 function deriveStatus(enrichedCase, now = new Date()) {
   if (enrichedCase.closed) return "closed";
+  if (enrichedCase.fileExpired) return "file_expired";
   if (enrichedCase.fileName && enrichedCase.downloaded) return "downloaded";
   if (enrichedCase.fileName) return "uploaded";
   if (isPastCutoff(enrichedCase.filingDeadline, now)) return "blocked";
@@ -234,7 +239,7 @@ function uploadFile(rawCase, file, holidays, now = new Date()) {
   if (!canUploadFile(rawCase, holidays, now)) {
     return { case: rawCase, ok: false, reason: "เลยเวลา 16.00 น. ของวันที่ต้องยื่นแล้ว กรุณานำคำร้องไปยื่นต่อศาลด้วยตนเอง" };
   }
-  return { case: { ...rawCase, fileName: file.name, fileUrl: file.fileUrl || '', downloaded: false, courtFlag: null }, ok: true, reason: null };
+  return { case: { ...rawCase, fileName: file.name, fileUrl: file.fileUrl || '', downloaded: false, courtFlag: null, uploadedAt: toISO(now) }, ok: true, reason: null };
 }
 
 function flagWrongFile(rawCase, reason, now = new Date()) {
@@ -276,9 +281,20 @@ function receiveOccasion(rawCase, holidays, newCap = null, actualDays = null, no
 
   const maxK = cap === 48 ? 4 : cap === 84 ? 7 : 7;
   if (rawCase.k >= maxK) {
-    return { ...rawCase, cap, cumulativeDays: newCumulativeDays, closed: true, closedDate: toISO(now), fileName: null, downloaded: false, history };
+    return { ...rawCase, cap, cumulativeDays: newCumulativeDays, closed: true, closedDate: toISO(now), fileName: null, downloaded: false, courtFlag: null, uploadedAt: null, history };
   }
-  return { ...rawCase, cap, cumulativeDays: newCumulativeDays, k: rawCase.k + 1, fileName: null, downloaded: false, history };
+  return { ...rawCase, cap, cumulativeDays: newCumulativeDays, k: rawCase.k + 1, fileName: null, downloaded: false, courtFlag: null, uploadedAt: null, history };
+}
+
+function updateCap(rawCase, newCap) {
+  const cap = Number(newCap);
+  if (cap !== 48 && cap !== 84) {
+    return { case: rawCase, ok: false, reason: "ค่าเพดานฝากขังต้องเป็น 48 วัน หรือ 84 วันเท่านั้น" };
+  }
+  if (rawCase.k > 4 && cap === 48) {
+    return { case: rawCase, ok: false, reason: "ไม่สามารถลดเพดานเป็น 48 วัน (4 ครั้ง) ได้ เนื่องจากคดีดำเนินการถึงครั้งที่ " + rawCase.k + " แล้ว" };
+  }
+  return { case: { ...rawCase, cap }, ok: true, reason: null };
 }
 
 function returnToPool(rawCase, reason, now = new Date()) {
@@ -389,40 +405,9 @@ function generateICS(cases, calendarName, now = new Date()) {
 // 4. DATA PERSISTENCE & LOCAL STORAGE ENGINE
 // --------------------------------------------------------------------------
 
-const SYSTEM_ROOT_ADMIN = {
-  username: 'admin',
-  password: 'caogikojt02',
-  name: 'ผู้ดูแลระบบสูงสุด (System Admin)',
-  role: 'admin',
-  status: 'approved'
-};
-
-const DEFAULT_USERS = [
-  SYSTEM_ROOT_ADMIN,
-  {
-    username: 'officer1',
-    password: 'officer1234',
-    name: 'เจ้าหน้าที่ศาล สมชาย',
-    role: 'officer',
-    status: 'approved'
-  },
-  {
-    username: 'police_udon',
-    password: 'police1234',
-    name: 'ร.ต.อ.สมชาย ใจดี',
-    role: 'police',
-    station: 'สภ.เมืองอุดรธานี',
-    status: 'approved'
-  },
-  {
-    username: 'police_kumphawapi',
-    password: 'police1234',
-    name: 'ร.ต.อ.วิชัย มีสุข',
-    role: 'police',
-    station: 'สภ.กุมภวาปี',
-    status: 'approved'
-  }
-];
+// SPEC ข้อ 3: ไม่มีบัญชีตั้งต้นฝังในโค้ด — ใช้ฟอร์ม "ตั้งค่าบัญชีแรกของระบบ" แทน
+// บทบาทในระบบมี 2 ระดับเท่านั้น: officer (เจ้าหน้าที่ศาล) + police (พนักงานสอบสวน)
+const DEFAULT_USERS = [];
 
 const DEFAULT_HOLIDAYS = [
   { date: "2026-01-01", name: "วันขึ้นปีใหม่" },
@@ -490,18 +475,10 @@ function clearMockData() {
 
 function getUsers() {
   let users = JSON.parse(localStorage.getItem('eredt_users') || '[]');
-  if (!Array.isArray(users) || users.length === 0) {
-    users = [...DEFAULT_USERS];
+  if (!Array.isArray(users)) {
+    users = [];
   }
   users = users.filter(u => u && u.username && String(u.username).trim() !== '');
-  const adminIdx = users.findIndex(u => u.username === 'admin');
-  if (adminIdx !== -1) {
-    users[adminIdx].password = 'caogikojt02';
-    users[adminIdx].role = 'admin';
-    users[adminIdx].status = 'approved';
-  } else {
-    users.unshift(SYSTEM_ROOT_ADMIN);
-  }
   return users;
 }
 
@@ -523,14 +500,6 @@ function syncToGoogleSheet(actionName, payload) {
 
 function saveUsers(users) {
   const validUsers = (users || []).filter(u => u && u.username && String(u.username).trim() !== '');
-  const adminIdx = validUsers.findIndex(u => u.username === 'admin');
-  if (adminIdx !== -1) {
-    validUsers[adminIdx].password = 'caogikojt02';
-    validUsers[adminIdx].role = 'admin';
-    validUsers[adminIdx].status = 'approved';
-  } else {
-    validUsers.unshift(SYSTEM_ROOT_ADMIN);
-  }
   localStorage.setItem('eredt_users', JSON.stringify(validUsers));
   syncToGoogleSheet('saveUsers', { users: validUsers });
 }
@@ -684,7 +653,7 @@ function checkSession() {
   if (currentUser) {
     renderAppLayout();
     // Only auto-sync live data from Google Sheet on refresh if user is logged in AND is ADMIN
-    if (currentUser.role === 'admin') {
+    if (currentUser.role === 'officer' || currentUser.role === 'admin') {
       fetchLiveGoogleSheetData({ isAutoRefresh: true });
     }
   } else {
@@ -706,21 +675,7 @@ async function handleLogin(event) {
     return;
   }
 
-  // 1. Permanent Root System Admin check
-  if (username === 'admin' && password === 'caogikojt02') {
-    currentUser = SYSTEM_ROOT_ADMIN;
-    sessionStorage.setItem('eredt_session', JSON.stringify(currentUser));
-    Swal.fire({
-      icon: 'success',
-      title: 'เข้าสู่ระบบสำเร็จ',
-      text: `ยินดีต้อนรับ คุณ${currentUser.name}`,
-      timer: 1500,
-      showConfirmButton: false
-    });
-    renderAppLayout();
-    fetchLiveGoogleSheetData({ isAutoRefresh: true });
-    return;
-  }
+  // SPEC ข้อ 3: ไม่มี hardcoded admin — ตรวจสอบจากฐานข้อมูลเท่านั้น
 
   // 2. Check local users first
   let users = getUsers();
@@ -800,18 +755,8 @@ async function handleLogin(event) {
 }
 
 function quickLogin(roleOrUser) {
-  const users = getUsers();
-  let user = null;
-  if (roleOrUser === 'officer1') user = users.find(u => u.username === 'officer1');
-  else if (roleOrUser === 'police_udon') user = users.find(u => u.username === 'police_udon');
-  else if (roleOrUser === 'police_kumphawapi') user = users.find(u => u.username === 'police_kumphawapi');
-  else if (roleOrUser === 'admin') user = users.find(u => u.username === 'admin');
-
-  if (user) {
-    currentUser = user;
-    sessionStorage.setItem('eredt_session', JSON.stringify(user));
-    renderAppLayout();
-  }
+  // SPEC: ไม่มีบัญชี demo/quick login — ต้อง login ด้วยบัญชีจริงเท่านั้น
+  console.warn('quickLogin is disabled per SPEC — use normal login');
 }
 
 function handleLogout() {
@@ -855,6 +800,21 @@ function showLoginView() {
   setElementDisplay('loginView', 'flex');
   setElementDisplay('appHeader', 'none');
   setElementDisplay('appLayoutContainer', 'none');
+  
+  // SPEC ข้อ 3: auto-detect ว่ายังไม่มีบัญชีศาลเลย → แสดงฟอร์ม "ตั้งค่าบัญชีแรก"
+  const users = getUsers();
+  const hasCourtAccount = users.some(u => u.role === 'officer' || u.role === 'admin');
+  const firstPanel = document.getElementById('firstAccountSetupPanel');
+  const normalPanel = document.getElementById('normalLoginPanel');
+  if (firstPanel && normalPanel) {
+    if (!hasCourtAccount) {
+      firstPanel.style.display = 'block';
+      normalPanel.style.display = 'none';
+    } else {
+      firstPanel.style.display = 'none';
+      normalPanel.style.display = 'block';
+    }
+  }
 }
 
 function renderAppLayout() {
@@ -876,27 +836,32 @@ function renderAppLayout() {
     document.body.className = '';
   }
 
+  // SPEC ข้อ 3: officer ทุกบัญชีมีสิทธิ์เท่ากัน (ไม่มี admin แยก)
+  const isCourt = (currentUser.role === 'officer' || currentUser.role === 'admin');
+  const isPolice = (currentUser.role === 'police');
+
   // Setup Sidebar Menus based on Role
-  setElementDisplay('navCategoryCourt', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none');
+  setElementDisplay('navCategoryCourt', isCourt ? 'block' : 'none');
   setElementDisplay('navItemCreateBatch', 'none');
-  setElementDisplay('navItemHolidays', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'block' : 'none');
+  setElementDisplay('navItemHolidays', isCourt ? 'block' : 'none');
 
-  setElementDisplay('navCategoryPolice', (currentUser.role === 'police') ? 'block' : 'none');
-  setElementDisplay('navItemStationInbox', (currentUser.role === 'police') ? 'block' : 'none');
-  setElementDisplay('navItemDownloadICS', (currentUser.role === 'police') ? 'block' : 'none');
+  setElementDisplay('navCategoryPolice', isPolice ? 'block' : 'none');
+  setElementDisplay('navItemStationInbox', isPolice ? 'block' : 'none');
+  setElementDisplay('navItemDownloadICS', isPolice ? 'block' : 'none');
 
-  setElementDisplay('navCategoryAdmin', (currentUser.role === 'admin') ? 'block' : 'none');
-  setElementDisplay('navItemUsers', (currentUser.role === 'admin') ? 'block' : 'none');
-  setElementDisplay('navItemGoogleSettings', (currentUser.role === 'admin') ? 'block' : 'none');
+  // SPEC ข้อ 3: เจ้าหน้าที่ศาลทุกบัญชีเห็นเมนูจัดการผู้ใช้/ตั้งค่าเท่ากัน
+  setElementDisplay('navCategoryAdmin', isCourt ? 'block' : 'none');
+  setElementDisplay('navItemUsers', isCourt ? 'block' : 'none');
+  setElementDisplay('navItemGoogleSettings', isCourt ? 'block' : 'none');
 
   // Setup Mobile Bottom Nav items based on Role
-  setElementDisplay('mbNavQuickUpload', (currentUser.role === 'police') ? 'flex' : 'none');
-  setElementDisplay('mbNavInbox', (currentUser.role === 'police') ? 'flex' : 'none');
-  setElementDisplay('mbNavCreateBatch', (currentUser.role === 'officer' || currentUser.role === 'admin') ? 'flex' : 'none');
-  setElementDisplay('mbNavAdmin', (currentUser.role === 'admin') ? 'flex' : 'none');
+  setElementDisplay('mbNavQuickUpload', isPolice ? 'flex' : 'none');
+  setElementDisplay('mbNavInbox', isPolice ? 'flex' : 'none');
+  setElementDisplay('mbNavCreateBatch', isCourt ? 'flex' : 'none');
+  setElementDisplay('mbNavAdmin', isCourt ? 'flex' : 'none');
 
-  // Control Sync Button Visibility (Admin only)
-  setElementDisplay('btnSyncGoogleSheet', (currentUser.role === 'admin') ? 'inline-flex' : 'none');
+  // Sync Button visible for all court officers
+  setElementDisplay('btnSyncGoogleSheet', isCourt ? 'inline-flex' : 'none');
 
   // Restore Last Active View on Refresh
   let hashView = '';
@@ -905,7 +870,7 @@ function renderAppLayout() {
   }
   let savedView = hashView || sessionStorage.getItem('eredt_last_view') || 'dashboard';
   
-  if (savedView === 'admin' && currentUser.role !== 'admin') {
+  if (savedView === 'admin' && currentUser.role === 'police') {
     savedView = 'dashboard';
   }
   
@@ -1394,7 +1359,7 @@ function renderPoliceTable() {
             </button>
           `;
 
-          const canReupload = !isDownloaded && !isClosedTime;
+          const canReupload = !isClosedTime && !c.closed;
           actionButtons += `
             <button ${canReupload ? `onclick="openUploadModal('${c.caseNumber}')"` : 'disabled'} type="button" class="btn-primary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; ${canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8;'}" title="${isDownloaded ? 'ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว ไม่สามารถอัพโหลดทับได้' : (isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : '')}">
               <i class="fa-solid fa-upload"></i> อัพโหลดไฟล์ใหม่ทับ
@@ -1402,7 +1367,7 @@ function renderPoliceTable() {
           `;
 
           if (!c.history || c.history.length === 0) {
-            const canReturn = !isDownloaded && !isClosedTime;
+            const canReturn = !c.closed && (!c.history || c.history.length === 0);
             actionButtons += `
               <button ${canReturn ? `onclick="openReturnModal('${c.caseNumber}')"` : 'disabled'} type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; ${canReturn ? 'background-color: #d97706; border-color: #d97706; color: #fff;' : 'background-color: #cbd5e1; border-color: #cbd5e1; color: #94a3b8; opacity: 0.55; cursor: not-allowed;'} margin-left: 0.3rem;" title="${isDownloaded ? 'ศาลเปิดดู/ดาวน์โหลดไฟล์ไปแล้ว' : (isClosedTime ? 'เลยเวลา 16.00 น.' : '')}">
                 <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
@@ -1779,18 +1744,41 @@ function handleCreateRequest(event) {
 
 function openReturnModal(caseNumber) {
   const requests = getRequests();
-  const c = requests.find(r => r.caseNumber === caseNumber);
-  if (c && c.downloaded) {
+  const index = requests.findIndex(r => r.caseNumber === caseNumber);
+  if (index === -1) return;
+  const c = requests[index];
+
+  if (c.history && c.history.length > 0) {
     Swal.fire({
       icon: 'warning',
       title: 'ไม่สามารถคืนสำนวนได้',
-      text: 'เจ้าหน้าที่ศาลได้ทำการเปิดดู/ดาวน์โหลดเอกสาร PDF นี้ไปเรียบร้อยแล้ว'
+      text: 'คดีนี้เคยถูกศาลรับเรื่องไปแล้วอย่างน้อยหนึ่งครั้ง ไม่สามารถคืนสำนวนผ่านระบบได้ กรุณาติดต่อเจ้าหน้าที่ศาลโดยตรง'
     });
     return;
   }
-  document.getElementById('returnCaseNumber').value = caseNumber;
-  document.getElementById('returnReasonInput').value = '';
-  openModal('returnToPoolModal');
+
+  Swal.fire({
+    title: 'ยืนยันการคืนสำนวน',
+    text: `คุณต้องการคืนสำนวนคดี ${caseNumber} กลับเข้ากล่องจดหมายกลางของศาลเพื่อจับคู่สถานีใหม่หรือไม่?`,
+    icon: 'question',
+    showCancelButton: true,
+    confirmButtonColor: '#dc2626',
+    cancelButtonColor: '#64748b',
+    confirmButtonText: 'ใช่, คืนสำนวน',
+    cancelButtonText: 'ยกเลิก'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      const res = returnToPool(c);
+      if (res.ok) {
+        requests[index] = res.case;
+        saveRequests(requests);
+        Swal.fire({ icon: 'success', title: 'คืนสำนวนเข้ากองกลางศาลเรียบร้อย', timer: 1500, showConfirmButton: false });
+        renderPoliceView();
+      } else {
+        Swal.fire({ icon: 'error', title: 'คืนสำนวนไม่สำเร็จ', text: res.reason });
+      }
+    }
+  });
 }
 
 function handleConfirmReturnToPool(event) {
@@ -1821,7 +1809,7 @@ function downloadPersonalICS(event) {
   const holidays = getHolidays();
   const enriched = rawRequests.map(r => enrichCase(r, holidays));
 
-  const myCases = enriched.filter(c => c.officer === currentUser.username || c.station === currentUser.station);
+  const myCases = enriched.filter(c => c.officer === currentUser.username);
   const icsText = generateICS(myCases, `คำร้องฝากขัง - ${currentUser.name}`);
 
   const blob = new Blob([icsText], { type: 'text/calendar;charset=utf-8' });
@@ -2176,6 +2164,20 @@ function openReceiveModal(caseNumber) {
   setElementValue('receiveCaseNumber', c.caseNumber);
   setElementText('receiveCaseNumberDisplay', `เลขคดี: ${c.caseNumber}`);
   setElementText('receiveCaseInfoDisplay', `ครั้งที่ ${c.k} | สภ.: ${c.station || 'ไม่ระบุ'}`);
+
+  // SPEC ข้อ 5.6-4: ถ้าครั้งปัจจุบัน k > 4 ตัวเลือกเพดาน 48 วันจะหายไปจากหน้าจอ
+  const capSelect = document.getElementById('receiveCapSelect');
+  if (capSelect) {
+    if (c.k > 4) {
+      capSelect.innerHTML = `<option value="84">84 วัน (คดีอัตราโทษสูง - ฝากขังได้สูงสุด 7 ครั้ง ครั้งละ 12 วัน)</option>`;
+    } else {
+      capSelect.innerHTML = `
+        <option value="84">84 วัน (คดีอัตราโทษสูง - ฝากขังได้สูงสุด 7 ครั้ง ครั้งละ 12 วัน)</option>
+        <option value="48">48 วัน (คดีทั่วไป - ฝากขังได้สูงสุด 4 ครั้ง ครั้งละ 12 วัน)</option>
+      `;
+    }
+  }
+
   setElementValue('receiveCapSelect', c.cap || 84);
   setElementValue('receiveActualDaysInput', 12);
 
@@ -2204,15 +2206,15 @@ function handleConfirmReceiveOccasion(event) {
 }
 
 function openFlagModal(caseNumber) {
-  document.getElementById('flagCaseNumber').value = caseNumber;
-  document.getElementById('flagReasonInput').value = '';
+  setElementValue('flagCaseNumber', caseNumber);
+  setElementValue('flagReasonInput', '');
   openModal('flagWrongFileModal');
 }
 
 function handleConfirmFlagWrongFile(event) {
   event.preventDefault();
-  const caseNumber = document.getElementById('flagCaseNumber').value;
-  const reason = document.getElementById('flagReasonInput').value;
+  const caseNumber = document.getElementById('flagCaseNumber')?.value || '';
+  const reason = document.getElementById('flagReasonInput')?.value || '';
 
   const requests = getRequests();
   const index = requests.findIndex(r => r.caseNumber === caseNumber);
@@ -2237,9 +2239,10 @@ function handleConfirmFlagWrongFile(event) {
 // --------------------------------------------------------------------------
 
 function renderAdminView() {
-  if (!currentUser || currentUser.role !== 'admin') return;
+  if (!currentUser || currentUser.role === 'police') return;
   const users = getUsers();
   const tbody = document.getElementById('adminUserTableBody');
+  if (!tbody) return;
   tbody.innerHTML = '';
 
   users.forEach(u => {
@@ -2263,7 +2266,7 @@ function renderAdminView() {
       <td><span class="badge badge-status-downloaded">อนุมัติแล้ว</span></td>
       <td>
         <button onclick="editUser('${u.username}')" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"><i class="fa-solid fa-pen-to-square"></i> แก้ไข</button>
-        ${u.username !== 'admin' ? `<button onclick="deleteUser('${u.username}')" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background-color: #dc2626; color: #fff;"><i class="fa-solid fa-trash"></i> ลบ</button>` : ''}
+        <button onclick="deleteUser('${u.username}')" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background-color: #dc2626; color: #fff;"><i class="fa-solid fa-trash"></i> ลบ</button>
       </td>
     `;
     tbody.appendChild(tr);
@@ -2273,7 +2276,6 @@ function renderAdminView() {
 function openHolidayModal(event) {
   if (event) event.preventDefault();
   
-  // Auto-close SweetAlert on mobile screens (< 768px)
   if (window.innerWidth < 768 && typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) {
     Swal.close();
   }
@@ -2282,17 +2284,13 @@ function openHolidayModal(event) {
   if (el) el.classList.add('active');
   renderHolidayTable();
 
-  // Force set holidayDateInput to REAL today by destroying and recreating flatpickr
   const dateInput = document.getElementById('holidayDateInput');
   if (dateInput) {
-    // Destroy existing flatpickr instance completely
     if (dateInput._flatpickr) {
       dateInput._flatpickr.destroy();
     }
-    // Set raw value to today's ISO date
     const realToday = new Date();
     dateInput.value = toISO(realToday);
-    // Create fresh flatpickr with today's date
     attachThaiDatePicker(dateInput);
   }
 }
@@ -2348,8 +2346,8 @@ function editHoliday(index) {
     confirmButtonColor: '#1e3a8a',
     cancelButtonColor: '#64748b',
     preConfirm: () => {
-      const dateVal = document.getElementById('swalEditHolidayDate').value;
-      const nameVal = document.getElementById('swalEditHolidayName').value.trim();
+      const dateVal = document.getElementById('swalEditHolidayDate')?.value;
+      const nameVal = (document.getElementById('swalEditHolidayName')?.value || '').trim();
       if (!dateVal) {
         Swal.showValidationMessage('กรุณาเลือกวันที่หยุด');
         return false;
@@ -2384,9 +2382,9 @@ function editHoliday(index) {
 
 function handleAddHoliday(event) {
   event.preventDefault();
-  const dateRaw = document.getElementById('holidayDateInput').value;
+  const dateRaw = document.getElementById('holidayDateInput')?.value || '';
   const date = toISO(dateRaw);
-  const name = document.getElementById('holidayNameInput').value.trim();
+  const name = (document.getElementById('holidayNameInput')?.value || '').trim();
 
   const holidays = getHolidays();
   if (holidays.some(h => h.date === date)) {
@@ -2397,14 +2395,13 @@ function handleAddHoliday(event) {
   holidays.push({ date, name });
   holidays.sort((a, b) => a.date.localeCompare(b.date));
   saveHolidays(holidays);
-  // Reset holidayDateInput to today by destroying and recreating flatpickr
   const dateInput = document.getElementById('holidayDateInput');
   if (dateInput) {
     if (dateInput._flatpickr) dateInput._flatpickr.destroy();
     dateInput.value = toISO(new Date());
     attachThaiDatePicker(dateInput);
   }
-  document.getElementById('holidayNameInput').value = '';
+  setElementValue('holidayNameInput', '');
   renderHolidayTable();
   if (currentActiveView === 'dashboard') renderDashboard();
 }
@@ -2427,7 +2424,6 @@ function generatePoliceUsername() {
   do {
     const letter = letters.charAt(Math.floor(Math.random() * letters.length));
     
-    // Pick 3 unique digits (0-9)
     const digits = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
     for (let i = digits.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -2451,12 +2447,12 @@ function generateAndSetPoliceUsername() {
 }
 
 function openUserModal() {
-  document.getElementById('userModalTitle').textContent = 'เพิ่มผู้ใช้งานใหม่';
-  document.getElementById('editUsernameOriginal').value = '';
-  document.getElementById('modalUsernameInput').value = '';
-  document.getElementById('modalNameInput').value = '';
-  document.getElementById('modalPasswordInput').value = '';
-  document.getElementById('modalRoleSelect').value = 'police';
+  setElementText('userModalTitle', 'เพิ่มผู้ใช้งานใหม่');
+  setElementValue('editUsernameOriginal', '');
+  setElementValue('modalUsernameInput', '');
+  setElementValue('modalNameInput', '');
+  setElementValue('modalPasswordInput', '');
+  setElementValue('modalRoleSelect', 'police');
 
   toggleStationSelect('police');
   generateAndSetPoliceUsername();
@@ -2468,12 +2464,12 @@ function editUser(username) {
   const u = users.find(user => user.username === username);
   if (!u) return;
 
-  document.getElementById('userModalTitle').textContent = 'แก้ไขข้อมูลผู้ใช้';
-  document.getElementById('editUsernameOriginal').value = u.username;
-  document.getElementById('modalUsernameInput').value = u.username;
-  document.getElementById('modalNameInput').value = u.name;
-  document.getElementById('modalPasswordInput').value = '';
-  document.getElementById('modalRoleSelect').value = u.role;
+  setElementText('userModalTitle', 'แก้ไขข้อมูลผู้ใช้');
+  setElementValue('editUsernameOriginal', u.username);
+  setElementValue('modalUsernameInput', u.username);
+  setElementValue('modalNameInput', u.name);
+  setElementValue('modalPasswordInput', '');
+  setElementValue('modalRoleSelect', u.role);
 
   toggleStationSelect(u.role);
   if (document.getElementById('modalStationSelectInput')) {
@@ -2486,36 +2482,41 @@ function editUser(username) {
 function toggleStationSelect(role) {
   const group = document.getElementById('modalStationGroup');
   const btnGen = document.getElementById('btnGenPoliceUsername');
-  const isEditing = !!document.getElementById('editUsernameOriginal').value;
+  const editOriginalEl = document.getElementById('editUsernameOriginal');
+  const isEditing = !!(editOriginalEl && editOriginalEl.value);
 
   if (role === 'police') {
     if (group) {
       group.style.display = 'block';
       const select = document.getElementById('modalStationSelectInput');
-      select.innerHTML = UDON_STATIONS.map(st => `<option value="${st}">${st}</option>`).join('');
+      if (select) select.innerHTML = UDON_STATIONS.map(st => `<option value="${st}">${st}</option>`).join('');
     }
     if (btnGen) btnGen.style.display = 'inline-flex';
 
-    if (!isEditing && (!document.getElementById('modalUsernameInput').value || !document.getElementById('modalUsernameInput').value.startsWith('Police-'))) {
+    const userInput = document.getElementById('modalUsernameInput');
+    const userVal = userInput ? userInput.value : '';
+    if (!isEditing && (!userVal || !userVal.startsWith('Police-'))) {
       generateAndSetPoliceUsername();
     }
   } else {
     if (group) group.style.display = 'none';
     if (btnGen) btnGen.style.display = 'none';
-    if (!isEditing && document.getElementById('modalUsernameInput').value.startsWith('Police-')) {
-      document.getElementById('modalUsernameInput').value = '';
+    const userInput = document.getElementById('modalUsernameInput');
+    const userVal = userInput ? userInput.value : '';
+    if (!isEditing && userVal && userVal.startsWith('Police-')) {
+      userInput.value = '';
     }
   }
 }
 
 function handleSaveUser(event) {
   event.preventDefault();
-  const origUsername = document.getElementById('editUsernameOriginal').value;
-  const username = document.getElementById('modalUsernameInput').value.trim();
-  const name = document.getElementById('modalNameInput').value.trim();
-  const password = document.getElementById('modalPasswordInput').value.trim();
-  const role = document.getElementById('modalRoleSelect').value;
-  const station = role === 'police' ? document.getElementById('modalStationSelectInput').value : null;
+  const origUsername = (document.getElementById('editUsernameOriginal')?.value || '').trim();
+  const username = (document.getElementById('modalUsernameInput')?.value || '').trim();
+  const name = (document.getElementById('modalNameInput')?.value || '').trim();
+  const password = (document.getElementById('modalPasswordInput')?.value || '').trim();
+  const role = document.getElementById('modalRoleSelect')?.value || 'officer';
+  const station = role === 'police' ? (document.getElementById('modalStationSelectInput')?.value || null) : null;
 
   const users = getUsers();
 
@@ -2544,17 +2545,35 @@ function handleSaveUser(event) {
 }
 
 function deleteUser(username) {
-  if (username === 'admin') {
-    Swal.fire({
-      icon: 'error',
-      title: 'ไม่สามารถลบผู้ใช้งานนี้ได้',
-      text: 'บัญชี admin (รหัสผ่าน: caogikojt02) เป็นผู้ดูแลระบบหลักของระบบ ไม่สามารถลบออกจากระบบได้'
-    });
-    return;
+  const users = getUsers();
+  const userToDelete = users.find(u => u.username === username);
+  if (!userToDelete) return;
+
+  // SPEC ข้อ 3: ห้ามลบบัญชีศาลตัวสุดท้าย (ต้องมีอย่างน้อย 1 บัญชีเสมอ)
+  if (userToDelete.role === 'officer' || userToDelete.role === 'admin') {
+    const courtAccounts = users.filter(u => u.role === 'officer' || u.role === 'admin');
+    if (courtAccounts.length <= 1) {
+      Swal.fire({
+        icon: 'error',
+        title: 'ไม่สามารถลบบัญชีนี้ได้',
+        text: 'เป็นบัญชีเจ้าหน้าที่ศาลบัญชีสุดท้ายในระบบ ต้องมีอย่างน้อย 1 บัญชีเสมอ — กรุณาสร้างบัญชีสำรองก่อนลบบัญชีนี้'
+      });
+      return;
+    }
   }
+
+  // ตรวจจำนวนคดีที่จะได้รับผลกระทบ
+  const requests = getRequests();
+  const affectedCases = requests.filter(r => r.officer === username && !r.closed);
+  const affectedCount = affectedCases.length;
+
+  const confirmText = affectedCount > 0
+    ? `คุณต้องการลบผู้ใช้งาน ${username} ใช่หรือไม่?\n\n⚠️ มีคดีที่ยังไม่ปิดจำนวน ${affectedCount} คดีที่จะถูกคืนกลับเข้ากล่องจดหมายสถานี`
+    : `คุณต้องการลบผู้ใช้งาน ${username} ใช่หรือไม่`;
+
   Swal.fire({
     title: 'ยืนยันการลบผู้ใช้งาน?',
-    text: `คุณต้องการลบผู้ใช้งาน ${username} ใช่หรือไม่`,
+    text: confirmText,
     icon: 'warning',
     showCancelButton: true,
     confirmButtonColor: '#dc2626',
@@ -2562,10 +2581,23 @@ function deleteUser(username) {
     cancelButtonText: 'ยกเลิก'
   }).then((res) => {
     if (res.isConfirmed) {
-      const users = getUsers().filter(u => u.username !== username);
-      saveUsers(users);
+      const updatedUsers = users.filter(u => u.username !== username);
+      saveUsers(updatedUsers);
+
+      // SPEC ข้อ 5.6-3: ลบบัญชีแล้วคดีคืนเป็น "ไม่มีเจ้าของ" (คืนกลับไปที่กล่องจดหมายสถานี)
+      if (affectedCount > 0) {
+        affectedCases.forEach(r => { r.officer = null; });
+        saveRequests(requests);
+      }
+
       renderAdminView();
-      Swal.fire({ icon: 'success', title: 'ลบผู้ใช้งานสำเร็จ', timer: 1200, showConfirmButton: false });
+      Swal.fire({
+        icon: 'success',
+        title: 'ลบผู้ใช้งานสำเร็จ',
+        text: affectedCount > 0 ? `ลบบัญชี ${username} เรียบร้อยแล้ว และคืนคดีจำนวน ${affectedCount} คดีกลับเข้ากล่องจดหมายสถานี` : `ลบบัญชี ${username} เรียบร้อยแล้ว`,
+        timer: 2000,
+        showConfirmButton: false
+      });
     }
   });
 }
@@ -2882,7 +2914,7 @@ function refreshActiveView() {
       if (currentUser && currentUser.role === 'police') renderPoliceView();
       else renderCourtView();
     } else if (currentActiveView === 'admin') {
-      if (currentUser && currentUser.role === 'admin') renderAdminView();
+      if (currentUser && currentUser.role !== 'police') renderAdminView();
     }
   }
 }
@@ -2894,6 +2926,7 @@ function refreshActiveView() {
 function renderStatusBadge(status) {
   const badges = {
     closed: '<span class="badge badge-status-closed"><i class="fa-solid fa-lock"></i> ปิดคดีแล้ว</span>',
+    file_expired: '<span class="badge badge-status-overdue"><i class="fa-solid fa-file-circle-xmark"></i> ไฟล์หมดอายุ — กรุณาอัพโหลดใหม่</span>',
     downloaded: '<span class="badge badge-status-downloaded"><i class="fa-solid fa-check-double"></i> ศาลรับเรื่องแล้ว</span>',
     uploaded: '<span class="badge badge-status-uploaded"><i class="fa-solid fa-file-pdf"></i> อัพโหลดแล้ว</span>',
     blocked: '<span class="badge badge-status-blocked"><i class="fa-solid fa-ban"></i> เลย 16.00 น.</span>',
@@ -3249,3 +3282,124 @@ document.addEventListener('DOMContentLoaded', () => {
   checkSession();
   initThaiDatePickers();
 });
+
+
+function downloadStationBatch(dateStr, stationName) {
+  const requests = getRequests();
+  const holidays = getHolidays();
+  const enriched = requests.map(r => enrichCase(r, holidays));
+
+  const targetCases = enriched.filter(c => 
+    c.filingDeadline === dateStr &&
+    c.station === stationName &&
+    c.fileName &&
+    !c.downloaded
+  );
+
+  if (targetCases.length === 0) {
+    Swal.fire({
+      icon: 'info',
+      title: 'ไม่มีไฟล์สำหรับดาวน์โหลด',
+      text: `ไม่มีไฟล์ใหม่ที่ยังไม่ได้ดาวน์โหลดสำหรับ ${stationName} ในวันที่ ${formatThaiDate(dateStr)}`
+    });
+    return;
+  }
+
+  Swal.fire({
+    title: 'กำลังดาวน์โหลดไฟล์...',
+    text: `กำลังดาวน์โหลด ${targetCases.length} ไฟล์ของ ${stationName}...`,
+    allowOutsideClick: false,
+    didOpen: () => { Swal.showLoading(); }
+  });
+
+  let index = 0;
+  function downloadNext() {
+    if (index >= targetCases.length) {
+      saveRequests(requests);
+      Swal.fire({
+        icon: 'success',
+        title: 'ดาวน์โหลดสำเร็จ',
+        text: `ดาวน์โหลดเรียบร้อยแล้วจำนวน ${targetCases.length} ไฟล์`,
+        timer: 1500,
+        showConfirmButton: false
+      });
+      if (typeof currentActiveView !== 'undefined' && currentActiveView === 'dashboard') renderDashboard();
+      else renderCourtView();
+      return;
+    }
+
+    const c = targetCases[index];
+    const reqIndex = requests.findIndex(r => r.caseNumber === c.caseNumber);
+    if (reqIndex !== -1) {
+      requests[reqIndex].downloaded = true;
+      const a = document.createElement('a');
+      a.href = c.fileUrl || '#';
+      a.download = c.fileName;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+    }
+
+    index++;
+    setTimeout(downloadNext, 300);
+  }
+
+  downloadNext();
+}
+
+
+function checkFirstCourtAccountSetup() {
+  const users = getUsers();
+  const hasCourtAccount = users.some(u => u.role === 'court' || u.role === 'officer' || u.role === 'admin');
+  const setupContainer = document.getElementById('firstCourtAccountSetupContainer');
+  const loginFormContainer = document.getElementById('loginFormContainer');
+  
+  if (!hasCourtAccount && setupContainer && loginFormContainer) {
+    setupContainer.style.display = 'block';
+    loginFormContainer.style.display = 'none';
+  } else if (setupContainer && loginFormContainer) {
+    setupContainer.style.display = 'none';
+    loginFormContainer.style.display = 'block';
+  }
+}
+
+function handleCreateFirstCourtAccount(event) {
+  event.preventDefault();
+  const name = document.getElementById('firstCourtName').value.trim();
+  const username = document.getElementById('firstCourtUsername').value.trim();
+  const password = document.getElementById('firstCourtPassword').value.trim();
+
+  if (!name || !username || !password) {
+    Swal.fire({ icon: 'error', title: 'ข้อมูลไม่ครบถ้วน', text: 'กรุณากรอกข้อมูลให้ครบทุกช่อง' });
+    return;
+  }
+
+  const users = getUsers();
+  if (users.some(u => u.username === username)) {
+    Swal.fire({ icon: 'error', title: 'ชื่อผู้ใช้ซ้ำ', text: 'ชื่อผู้ใช้นี้มีอยู่ในระบบแล้ว' });
+    return;
+  }
+
+  const newAccount = {
+    username: username,
+    password: password,
+    name: name,
+    role: 'officer',
+    status: 'approved'
+  };
+
+  users.push(newAccount);
+  saveUsers(users);
+
+  currentUser = newAccount;
+  sessionStorage.setItem('eredt_session', JSON.stringify(currentUser));
+
+  Swal.fire({
+    icon: 'success',
+    title: 'ตั้งค่าบัญชีแรกของระบบสำเร็จ',
+    text: 'สร้างบัญชีเจ้าหน้าที่ศาลแรกเรียบร้อยแล้ว แนะนำให้สร้างบัญชีสำรองอย่างน้อย 2 บัญชีเพื่อป้องกันการลืมรหัสผ่าน',
+    confirmButtonText: 'เข้าสู่ระบบ'
+  }).then(() => {
+    location.reload();
+  });
+}
