@@ -1,0 +1,9 @@
+{
+  "name": "udon-remand-tracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "ระบบติดตามคำร้องขอฝากขัง ศาลจังหวัดอุดรธานี",
+  "scripts": {
+    "test": "node --test lib/*.test.js"
+  }
+}
