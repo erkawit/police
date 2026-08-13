@@ -880,6 +880,7 @@ function renderAppLayout() {
   setElementDisplay('navCategoryAdmin', isCourt ? 'block' : 'none');
   setElementDisplay('navItemUsers', isAdmin ? 'block' : 'none');
   setElementDisplay('navItemGoogleSettings', isCourt ? 'block' : 'none');
+  setElementDisplay('navItemConfigGuide', isCourt ? 'block' : 'none');
 
   // Setup Mobile Bottom Nav items based on Role
   setElementDisplay('mbNavQuickUpload', isPolice ? 'flex' : 'none');
@@ -2684,6 +2685,103 @@ function saveGoogleSettings(event) {
 window.saveGoogleSettings = saveGoogleSettings;
 window.handleSaveGoogleSettings = saveGoogleSettings;
 
+function openConfigGuideModal(event) {
+  if (event) {
+    try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
+    try { if (typeof event.stopPropagation === 'function') event.stopPropagation(); } catch (e) {}
+  }
+  // Auto-close SweetAlert on mobile screens (< 768px)
+  if (window.innerWidth < 768 && typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) {
+    Swal.close();
+  }
+  closeModal('googleSettingsModal');
+  switchConfigGuideTab('overview');
+  openModal('configGuideModal');
+}
+window.openConfigGuideModal = openConfigGuideModal;
+
+function switchConfigGuideTab(tabName) {
+  const tabs = ['overview', 'script', 'drive', 'csv', 'migrate', 'template'];
+  const tabBtnMap = {
+    overview: 'tabBtnOverview',
+    script: 'tabBtnScript',
+    drive: 'tabBtnDrive',
+    csv: 'tabBtnCsv',
+    migrate: 'tabBtnMigrate',
+    template: 'tabBtnTemplate'
+  };
+  const tabContentMap = {
+    overview: 'guideTabOverview',
+    script: 'guideTabScript',
+    drive: 'guideTabDrive',
+    csv: 'guideTabCsv',
+    migrate: 'guideTabMigrate',
+    template: 'guideTabTemplate'
+  };
+
+  tabs.forEach(t => {
+    const btn = document.getElementById(tabBtnMap[t]);
+    const content = document.getElementById(tabContentMap[t]);
+    if (btn) {
+      if (t === tabName) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
+    }
+    if (content) {
+      content.style.display = (t === tabName) ? 'block' : 'none';
+    }
+  });
+
+  const container = document.getElementById('guideTabContentContainer');
+  if (container) container.scrollTop = 0;
+}
+window.switchConfigGuideTab = switchConfigGuideTab;
+
+function copyAppsScriptCode() {
+  const codeEl = document.getElementById('appsScriptCodeTemplate');
+  if (!codeEl) return;
+  const text = codeEl.innerText || codeEl.textContent;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      if (typeof Swal !== 'undefined') {
+        Swal.fire({
+          toast: true,
+          position: 'top-end',
+          icon: 'success',
+          title: 'คัดลอกโค้ด Apps Script เรียบร้อยแล้ว',
+          showConfirmButton: false,
+          timer: 2000
+        });
+      } else {
+        alert('คัดลอกโค้ด Apps Script เรียบร้อยแล้ว');
+      }
+    }).catch(err => {
+      console.error('Failed to copy text: ', err);
+    });
+  } else {
+    // Fallback selection for older browsers
+    const range = document.createRange();
+    range.selectNodeContents(codeEl);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+    document.execCommand('copy');
+    if (typeof Swal !== 'undefined') {
+      Swal.fire({
+        toast: true,
+        position: 'top-end',
+        icon: 'success',
+        title: 'คัดลอกโค้ด Apps Script เรียบร้อยแล้ว',
+        showConfirmButton: false,
+        timer: 2000
+      });
+    }
+  }
+}
+window.copyAppsScriptCode = copyAppsScriptCode;
+
 function parseCSV(text) {
   if (!text) return [];
   const lines = text.split(/\r?\n/).filter(line => line.trim() !== '');
@@ -2960,7 +3058,7 @@ function refreshActiveView() {
       if (currentUser && currentUser.role === 'police') renderPoliceView();
       else renderCourtView();
     } else if (currentActiveView === 'admin') {
-      if (currentUser && currentUser.role !== 'police') renderAdminView();
+      if (currentUser && currentUser.role === 'admin') renderAdminView();
     }
   }
 }
