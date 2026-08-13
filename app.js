@@ -67,13 +67,39 @@ const THAI_MONTHS_FULL = [
 // พร้อมระบบป้องกันข้อผิดพลาด ป้องกันการเกิด "NaN-NaN-NaN"
 function toISO(date) {
   if (!date) return toISO(new Date());
-  let d = date instanceof Date ? date : new Date(date);
-  if (isNaN(d.getTime())) {
-    if (typeof date === 'string' && date.includes('-')) {
-      const parts = date.split('-');
-      if (parts.length === 3) {
-        d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  let d = date instanceof Date ? date : null;
+  if (!d) {
+    if (typeof date === 'string') {
+      const str = date.trim();
+      if (str.includes('-')) {
+        const parts = str.split('-');
+        if (parts.length === 3) {
+          let y = parseInt(parts[0], 10);
+          let m = parseInt(parts[1], 10) - 1;
+          let day = parseInt(parts[2], 10);
+          if (y > 2400) y -= 543;
+          if (!isNaN(y) && !isNaN(m) && !isNaN(day)) {
+            d = new Date(y, m, day);
+          }
+        }
+      } else if (str.includes('/')) {
+        const parts = str.split('/');
+        if (parts.length === 3) {
+          let p1 = parseInt(parts[0], 10);
+          let p2 = parseInt(parts[1], 10);
+          let p3 = parseInt(parts[2], 10);
+          if (p1 > 2400) p1 -= 543;
+          if (p3 > 2400) p3 -= 543;
+          if (p1 > 31) {
+            d = new Date(p1, p2 - 1, p3);
+          } else {
+            d = new Date(p3, p2 - 1, p1);
+          }
+        }
       }
+    }
+    if (!d || isNaN(d.getTime())) {
+      d = new Date(date);
     }
   }
   if (isNaN(d.getTime())) d = new Date();
@@ -839,6 +865,7 @@ function renderAppLayout() {
   // SPEC ข้อ 3: officer ทุกบัญชีมีสิทธิ์เท่ากัน (ไม่มี admin แยก)
   const isCourt = (currentUser.role === 'officer' || currentUser.role === 'admin');
   const isPolice = (currentUser.role === 'police');
+  const isAdmin = (currentUser.role === 'admin');
 
   // Setup Sidebar Menus based on Role
   setElementDisplay('navCategoryCourt', isCourt ? 'block' : 'none');
@@ -849,16 +876,16 @@ function renderAppLayout() {
   setElementDisplay('navItemStationInbox', isPolice ? 'block' : 'none');
   setElementDisplay('navItemDownloadICS', isPolice ? 'block' : 'none');
 
-  // SPEC ข้อ 3: เจ้าหน้าที่ศาลทุกบัญชีเห็นเมนูจัดการผู้ใช้/ตั้งค่าเท่ากัน
+  // SPEC: เมนูจัดการผู้ใช้งานทำได้เฉพาะสิทธิผู้ดูแลระบบเท่านั้น
   setElementDisplay('navCategoryAdmin', isCourt ? 'block' : 'none');
-  setElementDisplay('navItemUsers', isCourt ? 'block' : 'none');
+  setElementDisplay('navItemUsers', isAdmin ? 'block' : 'none');
   setElementDisplay('navItemGoogleSettings', isCourt ? 'block' : 'none');
 
   // Setup Mobile Bottom Nav items based on Role
   setElementDisplay('mbNavQuickUpload', isPolice ? 'flex' : 'none');
   setElementDisplay('mbNavInbox', isPolice ? 'flex' : 'none');
   setElementDisplay('mbNavCreateBatch', isCourt ? 'flex' : 'none');
-  setElementDisplay('mbNavAdmin', isCourt ? 'flex' : 'none');
+  setElementDisplay('mbNavAdmin', isAdmin ? 'flex' : 'none');
 
   // Sync Button visible for all court officers
   setElementDisplay('btnSyncGoogleSheet', isCourt ? 'inline-flex' : 'none');
@@ -870,7 +897,7 @@ function renderAppLayout() {
   }
   let savedView = hashView || sessionStorage.getItem('eredt_last_view') || 'dashboard';
   
-  if (savedView === 'admin' && currentUser.role === 'police') {
+  if (savedView === 'admin' && currentUser.role !== 'admin') {
     savedView = 'dashboard';
   }
   
@@ -992,6 +1019,10 @@ function switchView(viewName, event, subTab) {
       renderCourtView();
     }
   } else if (viewName === 'admin') {
+    if (!currentUser || currentUser.role !== 'admin') {
+      switchView('dashboard');
+      return;
+    }
     setElementDisplay('adminView', 'block');
     setElementClass('navItemUsersLink', 'active', true);
     setElementClass('mbNavAdmin', 'active', true);
@@ -2239,7 +2270,7 @@ function handleConfirmFlagWrongFile(event) {
 // --------------------------------------------------------------------------
 
 function renderAdminView() {
-  if (!currentUser || currentUser.role === 'police') return;
+  if (!currentUser || currentUser.role !== 'admin') return;
   const users = getUsers();
   const tbody = document.getElementById('adminUserTableBody');
   if (!tbody) return;
@@ -2286,12 +2317,13 @@ function openHolidayModal(event) {
 
   const dateInput = document.getElementById('holidayDateInput');
   if (dateInput) {
-    if (dateInput._flatpickr) {
-      dateInput._flatpickr.destroy();
-    }
     const realToday = new Date();
-    dateInput.value = toISO(realToday);
-    attachThaiDatePicker(dateInput);
+    if (dateInput._flatpickr) {
+      dateInput._flatpickr.setDate(realToday, true);
+    } else {
+      dateInput.value = toISO(realToday);
+      attachThaiDatePicker(dateInput);
+    }
   }
 }
 
@@ -2304,7 +2336,7 @@ function renderHolidayTable() {
   holidays.forEach((h, index) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><b>${formatThaiDate(h.date)}</b></td>
+      <td><b>${formatThaiDate(h.date, true)}</b></td>
       <td>${h.name}</td>
       <td>
         <div style="display: flex; gap: 0.35rem; align-items: center;">
@@ -2397,9 +2429,13 @@ function handleAddHoliday(event) {
   saveHolidays(holidays);
   const dateInput = document.getElementById('holidayDateInput');
   if (dateInput) {
-    if (dateInput._flatpickr) dateInput._flatpickr.destroy();
-    dateInput.value = toISO(new Date());
-    attachThaiDatePicker(dateInput);
+    const realToday = new Date();
+    if (dateInput._flatpickr) {
+      dateInput._flatpickr.setDate(realToday, true);
+    } else {
+      dateInput.value = toISO(realToday);
+      attachThaiDatePicker(dateInput);
+    }
   }
   setElementValue('holidayNameInput', '');
   renderHolidayTable();
@@ -2764,8 +2800,14 @@ function parseHolidaysCSV(csvText) {
   const holidays = [];
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i];
-    if (r[0] && r[0].includes('-')) {
-      holidays.push({ date: String(r[0]).trim(), name: String(r[1] || '').trim() });
+    if (r && r[0]) {
+      const rawDateStr = String(r[0]).trim();
+      if (rawDateStr && rawDateStr.toLowerCase() !== 'date' && rawDateStr.toLowerCase() !== 'วันที่') {
+        const dateISO = toISO(rawDateStr);
+        if (dateISO && !dateISO.includes('NaN')) {
+          holidays.push({ date: dateISO, name: String(r[1] || '').trim() });
+        }
+      }
     }
   }
   return holidays;
@@ -2875,7 +2917,11 @@ async function fetchLiveGoogleSheetData(options = {}) {
     }
 
     if (Array.isArray(holidaysData) && holidaysData.length > 0) {
-      localStorage.setItem('eredt_holidays', JSON.stringify(holidaysData));
+      const normalizedHolidays = holidaysData.map(h => ({
+        date: toISO(h.date),
+        name: String(h.name || '').trim()
+      })).filter(h => h.date && !h.date.includes('NaN'));
+      localStorage.setItem('eredt_holidays', JSON.stringify(normalizedHolidays));
     }
 
     updateProgress(100, 'ดึงข้อมูลสำเร็จ!');
@@ -2962,6 +3008,8 @@ function getThaiFlatpickrLocale() {
 
 function attachThaiDatePicker(target) {
   if (typeof flatpickr === 'undefined') return;
+  if (!target) return;
+  if (target._flatpickr) return target._flatpickr;
 
   const localeObj = getThaiFlatpickrLocale();
   if (flatpickr.localize) {
@@ -2980,6 +3028,7 @@ function attachThaiDatePicker(target) {
     dateFormat: 'Y-m-d',
     altInput: true,
     altFormat: 'j F Y',
+    altInputClass: 'form-control flatpickr-input',
     defaultDate: target.value || realToday,
     allowInput: true,
     formatDate: function(date, formatStr, locale) {
@@ -3045,8 +3094,9 @@ function setThaiDatePickerValue(elementId, dateVal) {
 
 function initThaiDatePickers() {
   if (typeof flatpickr === 'undefined') return;
-  const elements = document.querySelectorAll('.thai-datepicker, input[type=date]');
+  const elements = document.querySelectorAll('.thai-datepicker:not(.flatpickr-input), input[type=date]:not(.flatpickr-input)');
   elements.forEach(el => {
+    if (el.classList.contains('flatpickr-input')) return;
     if (!el.value) {
       el.value = toISO(new Date());
     }
