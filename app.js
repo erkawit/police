@@ -3303,6 +3303,32 @@ async function fetchLiveGoogleSheetData(options = {}) {
     }
   }
 
+  async function safeFetchText(url) {
+    try {
+      const res = await fetch(url, { method: 'GET', mode: 'cors' });
+      if (!res.ok) return null;
+      if (res.redirected && res.url.includes('accounts.google.com')) return null;
+      const txt = await res.text();
+      if (!txt || txt.includes('<!DOCTYPE html>') || txt.includes('<html') || txt.includes('accounts.google.com')) {
+        return null;
+      }
+      return txt;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function safeFetchJson(url) {
+    try {
+      const res = await fetch(url, { method: 'GET', mode: 'cors' });
+      if (!res.ok) return null;
+      if (res.redirected && res.url.includes('accounts.google.com')) return null;
+      return await res.json();
+    } catch (e) {
+      return null;
+    }
+  }
+
   try {
     updateProgress(15, 'กำลังเชื่อมต่อ Google Sheet API...');
 
@@ -3316,47 +3342,38 @@ async function fetchLiveGoogleSheetData(options = {}) {
     // 1. Primary: Fetch via Apps Script WebApp if scriptUrl configured
     if (scriptUrl && scriptUrl.trim() !== '') {
       updateProgress(35, 'กำลังโหลดข้อมูลคดี...');
-      try {
-        const resReq = await fetch(`${scriptUrl}?action=getRequests`);
-        requestsData = await resReq.json();
-      } catch(e) { console.warn('Script getRequests error:', e); }
+      requestsData = await safeFetchJson(`${scriptUrl}?action=getRequests`);
 
       updateProgress(65, 'กำลังโหลดข้อมูลผู้ใช้งาน...');
-      try {
-        const resUser = await fetch(`${scriptUrl}?action=getUsers`);
-        usersData = await resUser.json();
-      } catch(e) { console.warn('Script getUsers error:', e); }
+      usersData = await safeFetchJson(`${scriptUrl}?action=getUsers`);
 
       updateProgress(85, 'กำลังโหลดข้อมูลวันหยุด...');
-      try {
-        const resHol = await fetch(`${scriptUrl}?action=getHolidays`);
-        holidaysData = await resHol.json();
-      } catch(e) { console.warn('Script getHolidays error:', e); }
+      holidaysData = await safeFetchJson(`${scriptUrl}?action=getHolidays`);
     }
 
     // 2. CSV API Fallback (Public CSV Endpoint)
     if (!requestsData || !Array.isArray(requestsData)) {
       updateProgress(40, 'กำลังโหลดข้อมูลคดีจาก Google Sheet (CSV)...');
-      try {
-        const csvReq = await fetch(`${csvBaseUrl}data`).then(r => r.text());
+      const csvReq = await safeFetchText(`${csvBaseUrl}data`);
+      if (csvReq) {
         requestsData = parseRequestsCSV(csvReq);
-      } catch (e) { console.warn('CSV data fallback failed:', e); }
+      }
     }
 
     if (!usersData || !Array.isArray(usersData) || usersData.length === 0) {
       updateProgress(70, 'กำลังโหลดข้อมูลผู้ใช้จาก Google Sheet (CSV)...');
-      try {
-        const csvUser = await fetch(`${csvBaseUrl}users`).then(r => r.text());
+      const csvUser = await safeFetchText(`${csvBaseUrl}users`);
+      if (csvUser) {
         usersData = parseUsersCSV(csvUser);
-      } catch (e) { console.warn('CSV users fallback failed:', e); }
+      }
     }
 
     if (!holidaysData || !Array.isArray(holidaysData)) {
       updateProgress(85, 'กำลังโหลดข้อมูลวันหยุดจาก Google Sheet (CSV)...');
-      try {
-        const csvHol = await fetch(`${csvBaseUrl}holidays`).then(r => r.text());
+      const csvHol = await safeFetchText(`${csvBaseUrl}holidays`);
+      if (csvHol) {
         holidaysData = parseHolidaysCSV(csvHol);
-      } catch (e) { console.warn('CSV holidays fallback failed:', e); }
+      }
     }
 
     updateProgress(95, 'กำลังอัพเดทระบบ...');
@@ -3392,12 +3409,21 @@ async function fetchLiveGoogleSheetData(options = {}) {
       }, 250);
     }
   } catch (err) {
-    console.error('Fetch live data error:', err);
+    console.warn('Fetch live data notice:', err);
     if (hasOpenedSwal) {
       Swal.fire({
-        icon: 'error',
-        title: 'เกิดข้อผิดพลาดในการโหลดข้อมูล',
-        text: err.toString()
+        icon: 'warning',
+        title: 'ไม่สามารถดึงข้อมูลจาก Google Sheet ได้',
+        html: `
+          <div style="font-size: 0.85rem; text-align: left;">
+            <p style="margin-bottom: 0.5rem;">โปรดตรวจสอบสิทธิ์การแชร์ของ Google Sheet ดังนี้:</p>
+            <ol style="padding-left: 1.25rem; line-height: 1.5;">
+              <li>เปิด Google Sheet ของท่าน</li>
+              <li>คลิกปุ่ม <b>"แชร์" (Share)</b> ที่มุมขวาบน</li>
+              <li>ตรง "การเข้าถึงทั่วไป" ให้เปลี่ยนเป็น <b>"ทุกคนที่มีลิงก์" (Anyone with the link)</b> และกำหนดสิทธิ์เป็น <b>"ผู้มีสิทธิ์ดู" (Viewer)</b></li>
+            </ol>
+          </div>
+        `
       });
     }
   } finally {
