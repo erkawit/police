@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ระบบผัดฟ้องฝากขังออนไลน์ — สำหรับพนักงานสอบสวน (Police System)</title>
+  <!-- Favicon -->
+  <link rel="icon" type="image/png" href="img/logo.png">
+  <link rel="apple-touch-icon" href="img/logo.png">
   <!-- Google Fonts: Sarabun & Prompt -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,6 +19,9 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
   <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
   <script src="https://cdn.jsdelivr.net/npm/flatpickr/dist/l10n/th.js"></script>
+  <!-- jQuery & DataTables -->
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+  <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
   <!-- System Stylesheet -->
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -284,7 +290,7 @@
             </div>
 
             <div class="table-container">
-              <table class="data-table">
+              <table id="policeRequestsDataTable" class="data-table">
                 <thead>
                   <tr>
                     <th>ประเภท</th>
@@ -402,6 +408,6 @@
   </div>
 
   <!-- System JavaScript -->
-  <script src="app.js?v=2.0.3"></script>
+  <script src="app.js?v=2.1.0"></script>
 </body>
 </html>

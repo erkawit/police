@@ -1336,4 +1336,185 @@ table.data-table tr:hover td {
   font-weight: 700 !important;
 }
 
+/* ==========================================================================
+   DataTables System UX/UI Theme (For screens >= 768px)
+   ========================================================================== */
+
+.dataTables_wrapper {
+  position: relative;
+  clear: both;
+  font-family: 'Sarabun', 'Prompt', sans-serif;
+  color: var(--text-main);
+  padding-top: 0.5rem;
+}
+
+.dataTables_wrapper .dataTables_length,
+.dataTables_wrapper .dataTables_filter,
+.dataTables_wrapper .dataTables_info,
+.dataTables_wrapper .dataTables_paginate {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.dataTables_wrapper .dataTables_length {
+  float: left;
+  margin-bottom: 0.75rem;
+}
+
+.dataTables_wrapper .dataTables_length select {
+  padding: 0.35rem 1.8rem 0.35rem 0.6rem;
+  border: 1px solid var(--card-border);
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-main);
+  background-color: #ffffff;
+  outline: none;
+  cursor: pointer;
+  transition: border-color 0.2s ease;
+}
+
+.dataTables_wrapper .dataTables_length select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(120, 0, 0, 0.15);
+}
+
+.dataTables_wrapper .dataTables_filter {
+  float: right;
+  margin-bottom: 0.75rem;
+}
+
+.dataTables_wrapper .dataTables_filter input {
+  padding: 0.4rem 0.75rem;
+  border: 1px solid var(--card-border);
+  border-radius: 0.4rem;
+  font-size: 0.85rem;
+  color: var(--text-main);
+  outline: none;
+  margin-left: 0.4rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.dataTables_wrapper .dataTables_filter input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(120, 0, 0, 0.15);
+}
+
+.dataTables_wrapper .dataTables_info {
+  float: left;
+  padding-top: 0.85rem;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.dataTables_wrapper .dataTables_paginate {
+  float: right;
+  text-align: right;
+  padding-top: 0.65rem;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button {
+  display: inline-block;
+  min-width: 2rem;
+  padding: 0.35rem 0.7rem;
+  margin-left: 0.25rem;
+  text-align: center;
+  text-decoration: none !important;
+  cursor: pointer;
+  color: var(--text-main) !important;
+  border: 1px solid var(--card-border);
+  border-radius: 0.375rem;
+  background: #ffffff;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button:hover {
+  background: #f1f5f9 !important;
+  color: var(--primary) !important;
+  border-color: #cbd5e1 !important;
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.current,
+.dataTables_wrapper .dataTables_paginate .paginate_button.current:hover {
+  background: var(--primary) !important;
+  color: #ffffff !important;
+  border-color: var(--primary) !important;
+  font-weight: 700;
+  box-shadow: 0 2px 4px rgba(120, 0, 0, 0.2);
+}
+
+.dataTables_wrapper .dataTables_paginate .paginate_button.disabled,
+.dataTables_wrapper .dataTables_paginate .paginate_button.disabled:hover {
+  color: #94a3b8 !important;
+  background: #f8fafc !important;
+  border-color: #e2e8f0 !important;
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+/* Sorting Indicators */
+table.dataTable thead th.sorting,
+table.dataTable thead th.sorting_asc,
+table.dataTable thead th.sorting_desc {
+  cursor: pointer;
+  position: relative;
+  padding-right: 1.5rem !important;
+}
+
+table.dataTable thead th.sorting::after {
+  content: " \f0dc";
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  opacity: 0.35;
+  font-size: 0.75rem;
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+table.dataTable thead th.sorting_asc::after {
+  content: " \f0de";
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  opacity: 0.9;
+  color: var(--accent-gold);
+  font-size: 0.75rem;
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+table.dataTable thead th.sorting_desc::after {
+  content: " \f0dd";
+  font-family: "Font Awesome 6 Free";
+  font-weight: 900;
+  opacity: 0.9;
+  color: var(--accent-gold);
+  font-size: 0.75rem;
+  position: absolute;
+  right: 0.5rem;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+/* Hide legacy search input when DataTables is active on desktop */
+@media (min-width: 768px) {
+  #policeSearchInputWrapper {
+    display: none !important;
+  }
+}
+
+/* Hide DataTables controls on mobile */
+@media (max-width: 767px) {
+  .dataTables_wrapper .dataTables_length,
+  .dataTables_wrapper .dataTables_filter,
+  .dataTables_wrapper .dataTables_info,
+  .dataTables_wrapper .dataTables_paginate {
+    display: none !important;
+  }
+}
+
 

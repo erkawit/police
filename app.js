@@ -185,6 +185,28 @@ function isPastCutoff(filingDeadlineISO, now = new Date()) {
   return now > cutoff;
 }
 
+function checkSubmissionWindow(now = new Date()) {
+  const holidays = (typeof getHolidays === 'function') ? getHolidays() : DEFAULT_HOLIDAYS;
+  const nowISO = toISO(now);
+  const isWknd = isWeekend(now);
+  const isHoli = isHoliday(nowISO, holidays);
+  const hours = now.getHours();
+  const minutes = now.getMinutes();
+  const timeStr = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')} น.`;
+
+  if (isWknd) {
+    return { isOpen: false, reason: 'weekend', message: 'วันหยุดเสาร์-อาทิตย์ (ปิดรับยื่น)', timeStr };
+  }
+  if (isHoli) {
+    const holiObj = (holidays || []).find(h => h.date === nowISO);
+    return { isOpen: false, reason: 'holiday', message: `วันหยุดราชการ (${holiObj ? holiObj.name : 'วันหยุด'})`, timeStr };
+  }
+  if (hours >= FILING_CUTOFF_HOUR) {
+    return { isOpen: false, reason: 'past_16', message: `เลยเวลา 16.00 น. แล้ว (${timeStr}) — ปิดรับยื่นทางอิเล็กทรอนิกส์`, timeStr };
+  }
+  return { isOpen: true, reason: 'open', message: `เปิดรับยื่นคำร้องอิเล็กทรอนิกส์ (ยื่นได้ถึง 16.00 น.)`, timeStr };
+}
+
 function capMaxK(cap) {
   return CAP_MAX_K[cap] || null;
 }
@@ -541,17 +563,14 @@ function getUsers() {
   return users;
 }
 
-const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes auto-sync interval
 let autoSyncTimerId = null;
 
 function startAutoSyncTimer() {
-  if (autoSyncTimerId) clearInterval(autoSyncTimerId);
-  autoSyncTimerId = setInterval(() => {
-    if (currentUser) {
-      console.log('[e-REDT Police] 10-minute periodic auto-sync running...');
-      fetchLiveGoogleSheetData({ isAutoRefresh: true });
-    }
-  }, AUTO_SYNC_INTERVAL_MS);
+  // Auto-sync timer disabled per user request
+  if (autoSyncTimerId) {
+    clearInterval(autoSyncTimerId);
+    autoSyncTimerId = null;
+  }
 }
 
 function stopAutoSyncTimer() {
@@ -571,13 +590,6 @@ function syncToGoogleSheet(actionName, payload) {
       mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: actionName, ...payload })
-    }).then(() => {
-      // Immediate background re-sync to ensure local cache matches Sheet
-      setTimeout(() => {
-        if (typeof fetchLiveGoogleSheetData === 'function') {
-          fetchLiveGoogleSheetData({ isAutoRefresh: true });
-        }
-      }, 1200);
     }).catch(err => {
       console.warn('Google Sheet Sync warning:', err);
     });
@@ -689,7 +701,9 @@ function handleRealtimeMessage(msg) {
 function saveUsers(users) {
   const validUsers = (users || []).filter(u => u && u.username && String(u.username).trim() !== '');
   localStorage.setItem('eredt_users', JSON.stringify(validUsers));
-  syncToGoogleSheet('saveUsers', { users: validUsers });
+  if (validUsers.length > 0) {
+    syncToGoogleSheet('saveUsers', { users: validUsers });
+  }
   broadcastRealtimeUpdate('USERS_UPDATED');
 }
 
@@ -717,7 +731,9 @@ function getRequests() {
 
 function saveRequests(requests) {
   localStorage.setItem('eredt_requests', JSON.stringify(requests));
-  syncToGoogleSheet('saveRequests', { requests });
+  if (requests && requests.length > 0) {
+    syncToGoogleSheet('saveRequests', { requests });
+  }
   broadcastRealtimeUpdate('REQUESTS_UPDATED');
 }
 
@@ -727,7 +743,9 @@ function getHolidays() {
 
 function saveHolidays(holidays) {
   localStorage.setItem('eredt_holidays', JSON.stringify(holidays));
-  syncToGoogleSheet('saveHolidays', { holidays });
+  if (holidays && holidays.length > 0) {
+    syncToGoogleSheet('saveHolidays', { holidays });
+  }
   broadcastRealtimeUpdate('HOLIDAYS_UPDATED');
 }
 
@@ -851,9 +869,6 @@ function checkSession() {
 
   if (currentUser) {
     renderAppLayout();
-    startAutoSyncTimer();
-    // Auto-sync live data from Google Sheet on refresh/load for ALL logged in users (police and court)
-    fetchLiveGoogleSheetData({ isAutoRefresh: true });
   } else {
     showLoginView();
   }
@@ -1206,6 +1221,17 @@ function switchView(viewName, event, subTab) {
 // 7. DASHBOARD & CALENDAR ENGINE
 // --------------------------------------------------------------------------
 
+function isMyPoliceCase(c, user) {
+  if (!user || user.role !== 'police') return true;
+  const isStationMatch = (!c.station || !user.station || c.station === user.station);
+  const isOfficerMatch = (
+    c.officer === user.username ||
+    c.officer === user.name ||
+    (user.name && c.officer && (c.officer.includes(user.name) || user.name.includes(c.officer)))
+  );
+  return isStationMatch && Boolean(isOfficerMatch);
+}
+
 function renderDashboard() {
   if (!currentUser) return;
   const rawRequests = getRequests();
@@ -1214,10 +1240,13 @@ function renderDashboard() {
 
   let filteredCases = enrichedCases;
   if (currentUser && currentUser.role === 'police') {
-    filteredCases = enrichedCases.filter(c => c.officer === currentUser.username);
-    setElementText('dashboardSubtitle', `ติดตามกำหนดเวลาสำหรับ: ${currentUser.name || currentUser.username} (${currentUser.station || 'ไม่ระบุ'})`);
+    // กรองเฉพาะ สภ. ตนเอง และเฉพาะสำนวนคดีที่ตนเองรับผิดชอบ
+    filteredCases = enrichedCases.filter(c => isMyPoliceCase(c, currentUser));
+    setElementText('dashboardSubtitle', `สภ.: ${currentUser.station || 'ไม่ระบุ'} | พนักงานสอบสวน: คุณ${currentUser.name || currentUser.username} (แสดงเฉพาะสำนวนคดีในความรับผิดชอบ)`);
+    setElementText('dashStatTotalLabel', 'คดีในความรับผิดชอบของฉัน');
   } else {
     setElementText('dashboardSubtitle', `คำนวณวันยื่นล่วงหน้า 1 วันทำการและเวลาตัดยื่น 16.00 น. ตามระเบียบศาลจังหวัดอุดรธานี พ.ศ. 2569`);
+    setElementText('dashStatTotalLabel', 'คดีทั้งหมดของ สภ.');
   }
 
   setElementText('dashStatTotal', filteredCases.length);
@@ -1352,16 +1381,25 @@ function openDayDetailModal(dayISO) {
   let filtered = enriched.filter(c => c.filingDeadline === dayISO || c.legalDeadline === dayISO);
   const isPolice = (currentUser && currentUser.role === 'police');
   if (isPolice) {
-    filtered = filtered.filter(c => c.officer === currentUser.username);
+    // กรองเฉพาะ สภ. ตนเอง และเฉพาะคดีที่ตนเองรับผิดชอบ
+    filtered = filtered.filter(c => isMyPoliceCase(c, currentUser));
   }
 
   const dateTitle = formatThaiDate(dayISO, true);
+  const now = new Date();
+  const timeCheck = checkSubmissionWindow(now);
+  const isToday = (dayISO === toISO(now));
 
   if (filtered.length === 0) {
     Swal.fire({
       icon: 'info',
       title: `<i class="fa-solid fa-calendar-day" style="color: var(--primary);"></i> ประจำวันที่ ${dateTitle}`,
-      html: `<div style="font-size: 0.95rem; color: #475569; padding: 0.5rem 0;">ไม่มีรายการคำร้องผัดฟ้องฝากขังในวันนี้</div>`,
+      html: `
+        <div style="font-size: 0.95rem; color: #475569; padding: 0.5rem 0;">
+          ไม่มีรายการคำร้องผัดฟ้องฝากขังในความรับผิดชอบของท่านในวันนี้
+        </div>
+        ${isPolice ? `<div style="font-size: 0.8rem; color: #94a3b8; margin-top: 0.25rem;">(สภ.: ${currentUser.station || 'ไม่ระบุ'} | พนักงานสอบสวน: คุณ${currentUser.name || currentUser.username})</div>` : ''}
+      `,
       confirmButtonText: 'ตกลง',
       confirmButtonColor: '#1e3a8a'
     });
@@ -1371,7 +1409,7 @@ function openDayDetailModal(dayISO) {
   let tableHtml = '';
 
   if (!isPolice) {
-    // SPEC ข้อ 5.5: ดาวน์โหลดไฟล์คำร้องแบบกลุ่มแยกตามสถานีประจำวัน (ฝั่งศาล)
+    // ฝั่งศาล: แสดงตารางแยกตาม สภ.
     const stationsMap = {};
     filtered.forEach(c => {
       const st = c.station || 'รอจับคู่สถานี';
@@ -1440,46 +1478,120 @@ function openDayDetailModal(dayISO) {
 
     tableHtml = `<div style="max-height: 420px; overflow-y: auto; text-align: left; margin-top: 0.5rem;">${groupsHtml}</div>`;
   } else {
-    // Police view: single clean table of officer's cases
+    // ฝั่งตำรวจ: แสดงเฉพาะสำนวนของตนเอง พร้อมปุ่มอัพโหลดไฟล์และตรวจสอบเวลา 16.00 น.
+    const bannerStatusHtml = `
+      <div style="background: ${timeCheck.isOpen ? '#ecfdf5' : '#fef2f2'}; border: 1px solid ${timeCheck.isOpen ? '#a7f3d0' : '#fecaca'}; color: ${timeCheck.isOpen ? '#065f46' : '#991b1b'}; padding: 0.6rem 0.85rem; border-radius: 0.5rem; font-size: 0.825rem; font-weight: 600; margin-bottom: 0.75rem; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.4rem; text-align: left;">
+        <div>
+          <i class="${timeCheck.isOpen ? 'fa-solid fa-clock-check' : 'fa-solid fa-clock-rotate-left'}"></i>
+          <span><b>สถานะเวลายื่นคำร้อง:</b> ${timeCheck.message}</span>
+        </div>
+        <div style="font-family: monospace; font-size: 0.875rem; font-weight: 700; color: #1e3a8a;">
+          เวลาปัจจุบัน: ${timeCheck.timeStr}
+        </div>
+      </div>
+    `;
+
     let rowsHtml = filtered.map(c => {
       const typeBadge = c.type === 'ยฝ.' ? '<span class="badge badge-type-yf">ยฝ.</span>' : '<span class="badge badge-type-f">ฝ.</span>';
-      const pdfBtn = c.fileName ? `
-        <button onclick="Swal.close(); previewPdfFile('${c.caseNumber}', event);" type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; background-color: #0284c7; border-color: #0284c7; color: #fff; width: auto;">
-          <i class="fa-solid fa-file-pdf"></i> ไฟล์ PDF
-        </button>
-      ` : '-';
+      
+      // ตรวจสอบเงื่อนไขการอัพโหลดไฟล์ (เวลาต้องไม่เกิน 16.00 น. ของวันทำการ)
+      const isPast = isPastCutoff(c.filingDeadline, now);
+      const isClosedTime = isPast;
+
+      let actionHtml = '';
+      if (c.closed) {
+        actionHtml = `<span class="badge badge-status-closed">ปิดคดีแล้ว</span>`;
+      } else if (c.status === 'downloaded') {
+        actionHtml = `
+          <div style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
+            <span class="badge badge-status-downloaded"><i class="fa-solid fa-circle-check"></i> ศาลรับเรื่องแล้ว</span>
+            ${c.fileName ? `
+              <button onclick="Swal.close(); previewPdfFile('${c.caseNumber}', event);" type="button" class="btn-secondary" style="padding: 0.2rem 0.45rem; font-size: 0.75rem; width: auto; background-color: #0284c7; color: #fff;" title="ดูไฟล์ PDF ที่แนบไว้">
+                <i class="fa-solid fa-file-pdf"></i>
+              </button>
+            ` : ''}
+          </div>
+        `;
+      } else if (c.courtFlag) {
+        actionHtml = `
+          <div style="display: flex; flex-direction: column; gap: 0.25rem; text-align: left;">
+            <span style="font-size: 0.75rem; color: #dc2626; font-weight: 700;"><i class="fa-solid fa-triangle-exclamation"></i> ศาลแจ้งไฟล์ผิด</span>
+            <div style="display: flex; gap: 0.3rem;">
+              <button onclick="Swal.close(); openUploadModal('${c.caseNumber}');" type="button" class="btn-primary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; width: auto; background-color: #dc2626; border-color: #dc2626;">
+                <i class="fa-solid fa-cloud-arrow-up"></i> แนบไฟล์ใหม่
+              </button>
+              ${c.fileName ? `
+                <button onclick="Swal.close(); previewPdfFile('${c.caseNumber}', event);" type="button" class="btn-secondary" style="padding: 0.2rem 0.45rem; font-size: 0.75rem; width: auto;" title="ดูไฟล์เดิม">
+                  <i class="fa-solid fa-file-pdf"></i>
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      } else {
+        if (isClosedTime) {
+          actionHtml = `
+            <div style="display: flex; flex-direction: column; gap: 0.2rem; text-align: left;">
+              <button disabled type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; width: auto; opacity: 0.6; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8; color: #fff;" title="เลยเวลา 16.00 น. ของวันครบกำหนดยื่นในระบบแล้ว ต้องนำเอกสารไปยื่นต่อศาลด้วยตนเอง">
+                <i class="fa-solid fa-lock"></i> เลย 16.00 น. (ปิดรับ)
+              </button>
+              ${c.fileName ? `
+                <button onclick="Swal.close(); previewPdfFile('${c.caseNumber}', event);" type="button" class="btn-secondary" style="padding: 0.2rem 0.45rem; font-size: 0.75rem; width: auto; background-color: #0284c7; color: #fff;" title="ดูไฟล์ PDF">
+                  <i class="fa-solid fa-file-pdf"></i> ดูไฟล์
+                </button>
+              ` : ''}
+            </div>
+          `;
+        } else {
+          actionHtml = `
+            <div style="display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap;">
+              <button onclick="Swal.close(); openUploadModal('${c.caseNumber}');" type="button" class="btn-primary" style="padding: 0.25rem 0.6rem; font-size: 0.75rem; width: auto; background-color: #2563eb; border-color: #2563eb;">
+                <i class="fa-solid fa-cloud-arrow-up"></i> ${c.fileName ? 'อัพโหลดทับ' : 'อัพโหลด PDF'}
+              </button>
+              ${c.fileName ? `
+                <button onclick="Swal.close(); previewPdfFile('${c.caseNumber}', event);" type="button" class="btn-secondary" style="padding: 0.2rem 0.45rem; font-size: 0.75rem; width: auto; background-color: #0284c7; color: #fff;" title="ดูตัวอย่างไฟล์ PDF">
+                  <i class="fa-solid fa-file-pdf"></i>
+                </button>
+              ` : ''}
+            </div>
+          `;
+        }
+      }
 
       return `
         <tr style="border-bottom: 1px solid #f1f5f9;">
           <td style="padding: 0.6rem 0.4rem;">${typeBadge}</td>
           <td style="padding: 0.6rem 0.4rem;"><b>${c.caseNumber}</b></td>
-          <td style="padding: 0.6rem 0.4rem;">${c.station || 'รอกำหนด'}</td>
           <td style="padding: 0.6rem 0.4rem;">ครั้งที่ ${c.k}</td>
-          <td style="padding: 0.6rem 0.4rem;"><b style="color: #b45309;">${formatThaiDate(c.legalDeadline)}</b></td>
+          <td style="padding: 0.6rem 0.4rem;"><b style="color: #b45309;">${formatThaiDate(c.filingDeadline)}</b></td>
+          <td style="padding: 0.6rem 0.4rem;">${formatThaiDate(c.legalDeadline)}</td>
           <td style="padding: 0.6rem 0.4rem;">${renderStatusBadge(c.status)}</td>
-          <td style="padding: 0.6rem 0.4rem;">${pdfBtn}</td>
+          <td style="padding: 0.6rem 0.4rem;">${actionHtml}</td>
         </tr>
       `;
     }).join('');
 
     tableHtml = `
-      <div style="max-height: 360px; overflow-y: auto; text-align: left; margin-top: 0.5rem;">
-        <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
-          <thead>
-            <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">
-              <th style="padding: 0.5rem 0.4rem;">ประเภท</th>
-              <th style="padding: 0.5rem 0.4rem;">เลขฝากขัง</th>
-              <th style="padding: 0.5rem 0.4rem;">สภ.</th>
-              <th style="padding: 0.5rem 0.4rem;">ครั้งที่</th>
-              <th style="padding: 0.5rem 0.4rem;">ครบกำหนด</th>
-              <th style="padding: 0.5rem 0.4rem;">สถานะ</th>
-              <th style="padding: 0.5rem 0.4rem;">เอกสาร</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rowsHtml}
-          </tbody>
-        </table>
+      <div style="text-align: left; margin-top: 0.25rem;">
+        ${bannerStatusHtml}
+        <div style="max-height: 380px; overflow-y: auto;">
+          <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid #e2e8f0; text-align: left;">
+                <th style="padding: 0.5rem 0.4rem;">ประเภท</th>
+                <th style="padding: 0.5rem 0.4rem;">เลขฝากขัง</th>
+                <th style="padding: 0.5rem 0.4rem;">ครั้งที่</th>
+                <th style="padding: 0.5rem 0.4rem;">ต้องยื่นภายใน</th>
+                <th style="padding: 0.5rem 0.4rem;">ครบกำหนดจริง</th>
+                <th style="padding: 0.5rem 0.4rem;">สถานะ</th>
+                <th style="padding: 0.5rem 0.4rem;">อัพโหลดคำร้อง</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </div>
       </div>
     `;
   }
@@ -1487,7 +1599,7 @@ function openDayDetailModal(dayISO) {
   Swal.fire({
     title: `<i class="fa-solid fa-calendar-day" style="color: var(--primary);"></i> รายการคำร้องประจำวันที่ ${dateTitle}`,
     html: tableHtml,
-    width: window.innerWidth < 768 ? '95%' : (isPolice ? '680px' : '760px'),
+    width: window.innerWidth < 768 ? '95%' : (isPolice ? '740px' : '760px'),
     showConfirmButton: true,
     confirmButtonText: 'ปิดหน้าต่าง',
     confirmButtonColor: '#1e3a8a'
@@ -1610,18 +1722,38 @@ function renderPoliceView() {
 }
 
 function renderPoliceTable() {
-  const searchTerm = (document.getElementById('policeSearchInput')?.value || '').toLowerCase().trim();
+  const isDesktop = (window.innerWidth > 768);
   const rawRequests = getRequests();
   const holidays = getHolidays();
   const enriched = rawRequests.map(r => enrichCase(r, holidays));
 
-  const myCases = enriched.filter(c => c.officer === currentUser.username && (c.caseNumber.toLowerCase().includes(searchTerm) || (c.station && c.station.toLowerCase().includes(searchTerm))));
+  let myCases = enriched.filter(c => isMyPoliceCase(c, currentUser));
+
+  // Sort newest to oldest as default (ใหม่สุดไปหาเก่าสุด)
+  myCases.sort((a, b) => {
+    const dateA = a.createdAt || a.startDate || a.filingDeadline || '';
+    const dateB = b.createdAt || b.startDate || b.filingDeadline || '';
+    if (dateB !== dateA) return dateB.localeCompare(dateA);
+    return (b.caseNumber || '').localeCompare(a.caseNumber || '', undefined, { numeric: true });
+  });
+
+  // Destroy existing DataTable instance before re-populating
+  if (typeof jQuery !== 'undefined' && typeof jQuery.fn.DataTable !== 'undefined') {
+    jQuery.fn.dataTable.ext.errMode = 'none';
+    const tableEl = $('#policeRequestsDataTable');
+    if (tableEl.length && $.fn.DataTable.isDataTable(tableEl)) {
+      tableEl.DataTable().destroy();
+    }
+  }
 
   const tbody = document.getElementById('policeTableBody');
+  if (!tbody) return;
   tbody.innerHTML = '';
 
   if (myCases.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">ยังไม่มีคดีในทะเบียนส่วนตัวของคุณ (กดรับคดีจากกล่องจดหมายสถานีด้านบน)</td></tr>`;
+    if (!isDesktop) {
+      tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">ยังไม่มีคดีในความรับผิดชอบของคุณ (กดรับคดีจากกล่องจดหมายสถานีด้านบน)</td></tr>`;
+    }
   } else {
     myCases.forEach(c => {
       const typeBadge = c.type === 'ยฝ.' ? '<span class="badge badge-type-yf">ยฝ.</span>' : '<span class="badge badge-type-f">ฝ.</span>';
@@ -1692,13 +1824,13 @@ function renderPoliceTable() {
         }
       };
       tr.innerHTML = `
-        <td>${typeBadge}</td>
-        <td><b>${c.caseNumber}</b></td>
-        <td>ครั้งที่ ${c.k}</td>
-        <td><b style="color: #b45309;">${formatThaiDate(c.filingDeadline)}</b></td>
-        <td>${formatThaiDate(c.legalDeadline)}</td>
-        <td>${c.cap || 84} วัน (${c.cap === 48 ? 4 : 7} ครั้ง)</td>
-        <td>
+        <td data-order="${c.type || ''}">${typeBadge}</td>
+        <td data-order="${c.caseNumber || ''}"><b>${c.caseNumber}</b></td>
+        <td data-order="${c.k || 1}">ครั้งที่ ${c.k}</td>
+        <td data-order="${c.filingDeadline || ''}"><b style="color: #b45309;">${formatThaiDate(c.filingDeadline)}</b></td>
+        <td data-order="${c.legalDeadline || ''}">${formatThaiDate(c.legalDeadline)}</td>
+        <td data-order="${c.cap || 84}">${c.cap || 84} วัน (${c.cap === 48 ? 4 : (c.cap === 12 ? 1 : 7)} ครั้ง)</td>
+        <td data-order="${c.status || ''}">
           ${renderStatusBadge(c.status)}
           ${c.fileName ? `<br><small style="color: var(--text-muted);">${c.fileName}</small>` : ''}
           ${flagWarning}
@@ -1707,6 +1839,36 @@ function renderPoliceTable() {
       `;
       tbody.appendChild(tr);
     });
+  }
+
+  // Initialize DataTables for desktop & tablet landscape screens (> 768px)
+  if (isDesktop && typeof jQuery !== 'undefined' && typeof jQuery.fn.DataTable !== 'undefined') {
+    jQuery.fn.dataTable.ext.errMode = 'none';
+    const tableEl = $('#policeRequestsDataTable');
+    if (tableEl.length) {
+      tableEl.DataTable({
+        pageLength: 25,
+        lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "ทั้งหมด"]],
+        order: [], // Preserves newest-to-oldest pre-sorted order
+        language: {
+          search: "ค้นหาในตาราง:",
+          lengthMenu: "แสดง _MENU_ รายการต่อหน้า",
+          info: "แสดง _START_ ถึง _END_ จากทั้งหมด _TOTAL_ รายการ",
+          infoEmpty: "แสดง 0 ถึง 0 จาก 0 รายการ",
+          infoFiltered: "(กรองจากทั้งหมด _MAX_ รายการ)",
+          zeroRecords: "ไม่พบรายการคำร้องฝากขังตรงตามเงื่อนไขการค้นหา",
+          emptyTable: "ไม่มีรายการข้อมูลคำร้องฝากขังในความรับผิดชอบ",
+          paginate: {
+            first: '<i class="fa-solid fa-angles-left"></i>',
+            last: '<i class="fa-solid fa-angles-right"></i>',
+            next: '<i class="fa-solid fa-angle-right"></i>',
+            previous: '<i class="fa-solid fa-angle-left"></i>'
+          }
+        },
+        dom: '<"top"lf>rt<"bottom"ip><"clear">',
+        responsive: true
+      });
+    }
   }
 }
 
@@ -3303,11 +3465,11 @@ async function fetchLiveGoogleSheetData(options = {}) {
     }
   }
 
-  async function safeFetchText(url) {
+  async function safeFetchCsv(url) {
     try {
-      const res = await fetch(url, { method: 'GET', mode: 'cors' });
+      // Use redirect: 'error' to prevent browser from following 302 login redirects to accounts.google.com
+      const res = await fetch(url, { method: 'GET', mode: 'cors', redirect: 'error' });
       if (!res.ok) return null;
-      if (res.redirected && res.url.includes('accounts.google.com')) return null;
       const txt = await res.text();
       if (!txt || txt.includes('<!DOCTYPE html>') || txt.includes('<html') || txt.includes('accounts.google.com')) {
         return null;
@@ -3354,7 +3516,7 @@ async function fetchLiveGoogleSheetData(options = {}) {
     // 2. CSV API Fallback (Public CSV Endpoint)
     if (!requestsData || !Array.isArray(requestsData)) {
       updateProgress(40, 'กำลังโหลดข้อมูลคดีจาก Google Sheet (CSV)...');
-      const csvReq = await safeFetchText(`${csvBaseUrl}data`);
+      const csvReq = await safeFetchCsv(`${csvBaseUrl}data`);
       if (csvReq) {
         requestsData = parseRequestsCSV(csvReq);
       }
@@ -3362,7 +3524,7 @@ async function fetchLiveGoogleSheetData(options = {}) {
 
     if (!usersData || !Array.isArray(usersData) || usersData.length === 0) {
       updateProgress(70, 'กำลังโหลดข้อมูลผู้ใช้จาก Google Sheet (CSV)...');
-      const csvUser = await safeFetchText(`${csvBaseUrl}users`);
+      const csvUser = await safeFetchCsv(`${csvBaseUrl}users`);
       if (csvUser) {
         usersData = parseUsersCSV(csvUser);
       }
@@ -3370,7 +3532,7 @@ async function fetchLiveGoogleSheetData(options = {}) {
 
     if (!holidaysData || !Array.isArray(holidaysData)) {
       updateProgress(85, 'กำลังโหลดข้อมูลวันหยุดจาก Google Sheet (CSV)...');
-      const csvHol = await safeFetchText(`${csvBaseUrl}holidays`);
+      const csvHol = await safeFetchCsv(`${csvBaseUrl}holidays`);
       if (csvHol) {
         holidaysData = parseHolidaysCSV(csvHol);
       }
@@ -3949,3 +4111,14 @@ function handleCreateFirstCourtAccount(event) {
     location.reload();
   });
 }
+
+// Window resize handler to seamlessly adapt DataTables / Mobile Card views across 768px breakpoint
+let resizeTimeout = null;
+window.addEventListener('resize', () => {
+  if (resizeTimeout) clearTimeout(resizeTimeout);
+  resizeTimeout = setTimeout(() => {
+    if (typeof currentActiveView !== 'undefined' && currentActiveView === 'requests') {
+      renderPoliceTable();
+    }
+  }, 250);
+});
