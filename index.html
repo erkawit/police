@@ -245,7 +245,7 @@
                 <h3 style="font-size: 1.05rem; font-weight: 700; color: #ffffff;"><i class="fa-solid fa-cloud-arrow-up" style="color: var(--accent-gold);"></i> อัพโหลดคำร้องส่งศาล (Mobile Quick Upload)</h3>
                 <p style="font-size: 0.8rem; color: #cbd5e1; margin-top: 0.2rem;">เลือกคดีและแนบไฟล์ PDF ยื่นศาลได้รวดเร็วทันทีจากมือถือ</p>
               </div>
-              <button onclick="triggerMobileQuickUpload(event)" class="btn-primary" style="width: auto; background: var(--accent-gold); color: #0f172a !important; border: none; font-weight: 700; padding: 0.6rem 1rem;">
+              <button id="btnPoliceQuickUpload" onclick="triggerMobileQuickUpload(event)" class="btn-primary" style="width: auto; background: var(--accent-gold); color: #0f172a !important; border: none; font-weight: 700; padding: 0.6rem 1rem;">
                 <i class="fa-solid fa-file-circle-plus" style="color: #0f172a !important;"></i> อัพโหลดไฟล์ PDF ทันที
               </button>
             </div>
@@ -300,6 +300,7 @@
                     <th>วันครบกำหนดจริง</th>
                     <th>เพดานฝากขัง</th>
                     <th>สถานะ / เอกสาร PDF</th>
+                    <th>วันที่ศาลดาวน์โหลด</th>
                     <th>จัดการ</th>
                   </tr>
                 </thead>
@@ -352,6 +353,11 @@
 
       <form onsubmit="handleCreateRequest(event)">
         <input type="hidden" id="uploadCaseNumber">
+
+        <div style="background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 0.65rem 0.85rem; border-radius: 0.5rem; font-size: 0.825rem; margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem; line-height: 1.4;">
+          <i class="fa-solid fa-clock" style="font-size: 1.1rem; color: #2563eb; flex-shrink: 0;"></i>
+          <span><b>กำหนดเวลายื่นคำร้องออนไลน์:</b> เปิดให้อัพโหลดในวันทำการ <b>ไม่เกินเวลา 16.00 น.</b> ของวันครบกำหนดยื่น หากเกินเวลาต้องยื่นต่อศาลด้วยตนเอง</span>
+        </div>
 
         <div style="background: #f8fafc; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1.25rem; border: 1px solid #e2e8f0;">
           <div style="font-weight: 700; font-size: 1.1rem; color: var(--primary);" id="uploadCaseNumberDisplay">เลขคดี: -</div>
@@ -408,6 +414,6 @@
   </div>
 
   <!-- System JavaScript -->
-  <script src="app.js?v=2.1.0"></script>
+  <script src="app.js?v=2.2.0"></script>
 </body>
 </html>
