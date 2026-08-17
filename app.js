@@ -21,7 +21,7 @@ const DAYS_PER_OCCASION = 12; // ป.วิ.อาญา ม.87: ฝากขั
 const FILING_CUTOFF_HOUR = 16; // ข้อ 6: ยื่นทางระบบได้ไม่เกิน 16.00 น.
 const PURGE_DAYS = 60;
 const FILE_PURGE_DAYS = 12; // ไฟล์ PDF ถูกลบอัตโนมัติ 12 วันหลังอัพโหลด (SPEC ข้อ 6)
-const CAP_MAX_K = { 48: 4, 84: 7 };
+const CAP_MAX_K = { 12: 1, 48: 4, 84: 7 };
 const MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024; // 20 MB
 const ALLOWED_UPLOAD_EXTENSION = ".pdf";
 
@@ -305,7 +305,7 @@ function receiveOccasion(rawCase, holidays, newCap = null, actualDays = null, no
   };
   const history = [...(rawCase.history || []), historyEntry];
 
-  const maxK = cap === 48 ? 4 : cap === 84 ? 7 : 7;
+  const maxK = cap === 12 ? 1 : (cap === 48 ? 4 : (cap === 84 ? 7 : 7));
   if (rawCase.k >= maxK) {
     return { ...rawCase, cap, cumulativeDays: newCumulativeDays, closed: true, closedDate: toISO(now), fileName: null, downloaded: false, courtFlag: null, uploadedAt: null, history };
   }
@@ -314,8 +314,11 @@ function receiveOccasion(rawCase, holidays, newCap = null, actualDays = null, no
 
 function updateCap(rawCase, newCap) {
   const cap = Number(newCap);
-  if (cap !== 48 && cap !== 84) {
-    return { case: rawCase, ok: false, reason: "ค่าเพดานฝากขังต้องเป็น 48 วัน หรือ 84 วันเท่านั้น" };
+  if (cap !== 12 && cap !== 48 && cap !== 84) {
+    return { case: rawCase, ok: false, reason: "ค่าเพดานฝากขังต้องเป็น 12 วัน, 48 วัน หรือ 84 วันเท่านั้น" };
+  }
+  if (rawCase.k > 1 && cap === 12) {
+    return { case: rawCase, ok: false, reason: "ไม่สามารถลดเพดานเป็น 12 วัน (1 ครั้ง) ได้ เนื่องจากคดีดำเนินการถึงครั้งที่ " + rawCase.k + " แล้ว" };
   }
   if (rawCase.k > 4 && cap === 48) {
     return { case: rawCase, ok: false, reason: "ไม่สามารถลดเพดานเป็น 48 วัน (4 ครั้ง) ได้ เนื่องจากคดีดำเนินการถึงครั้งที่ " + rawCase.k + " แล้ว" };
@@ -2824,12 +2827,12 @@ function openGoogleSettingsModal(event) {
     try { if (typeof event.stopPropagation === 'function') event.stopPropagation(); } catch (e) {}
   }
 
-  if (!currentUser || currentUser.role !== 'admin') {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'officer')) {
     if (typeof Swal !== 'undefined') {
       Swal.fire({
         icon: 'error',
         title: 'ไม่มีสิทธิ์เข้าถึง',
-        text: 'เฉพาะสิทธิผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถตั้งค่าการเชื่อมต่อ Google Services ได้',
+        text: 'เฉพาะสิทธิเจ้าหน้าที่ศาลและผู้ดูแลระบบเท่านั้นที่สามารถตั้งค่าการเชื่อมต่อ Google Services ได้',
         confirmButtonColor: '#1e3a8a'
       });
     }
@@ -2853,17 +2856,93 @@ function openGoogleSettingsModal(event) {
 }
 window.openGoogleSettingsModal = openGoogleSettingsModal;
 
+function openConfigGuideModal(event) {
+  if (event) {
+    try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
+    try { if (typeof event.stopPropagation === 'function') event.stopPropagation(); } catch (e) {}
+  }
+
+  if (window.innerWidth < 768 && typeof Swal !== 'undefined' && Swal.isVisible && Swal.isVisible()) {
+    Swal.close();
+  }
+
+  openModal('configGuideModal');
+  switchConfigGuideTab('overview');
+}
+window.openConfigGuideModal = openConfigGuideModal;
+
+function switchConfigGuideTab(tabName) {
+  const tabs = ['overview', 'script', 'drive', 'csv', 'migrate', 'template'];
+  tabs.forEach(t => {
+    const btn = document.getElementById(`tabBtn${t.charAt(0).toUpperCase() + t.slice(1)}`);
+    const content = document.getElementById(`guideTab${t.charAt(0).toUpperCase() + t.slice(1)}`);
+    if (btn) {
+      if (t === tabName) btn.classList.add('active');
+      else btn.classList.remove('active');
+    }
+    if (content) {
+      if (t === tabName) content.style.display = 'block';
+      else content.style.display = 'none';
+    }
+  });
+}
+window.switchConfigGuideTab = switchConfigGuideTab;
+
+function copyAppsScriptCode() {
+  const codeEl = document.getElementById('appsScriptCodeTemplate');
+  if (!codeEl) return;
+  const text = codeEl.textContent || codeEl.innerText;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => {
+      Swal.fire({
+        icon: 'success',
+        title: 'คัดลอกโค้ดสำเร็จ',
+        text: 'คัดลอกโค้ด Google Apps Script ไปยังคลิปบอร์ดเรียบร้อยแล้ว',
+        timer: 1500,
+        showConfirmButton: false
+      });
+    }).catch(() => {
+      fallbackCopyText(text);
+    });
+  } else {
+    fallbackCopyText(text);
+  }
+
+  function fallbackCopyText(str) {
+    const textarea = document.createElement('textarea');
+    textarea.value = str;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      document.execCommand('copy');
+      Swal.fire({
+        icon: 'success',
+        title: 'คัดลอกโค้ดสำเร็จ',
+        text: 'คัดลอกโค้ด Google Apps Script ไปยังคลิปบอร์ดเรียบร้อยแล้ว',
+        timer: 1500,
+        showConfirmButton: false
+      });
+    } catch (err) {
+      Swal.fire({ icon: 'info', title: 'โปรดเลือกและคัดลอกข้อความด้วยตนเอง' });
+    }
+    document.body.removeChild(textarea);
+  }
+}
+window.copyAppsScriptCode = copyAppsScriptCode;
+
 function saveGoogleSettings(event) {
   if (event) {
     try { if (typeof event.preventDefault === 'function') event.preventDefault(); } catch (e) {}
   }
 
-  if (!currentUser || currentUser.role !== 'admin') {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'officer')) {
     if (typeof Swal !== 'undefined') {
       Swal.fire({
         icon: 'error',
         title: 'ไม่มีสิทธิ์เข้าถึง',
-        text: 'เฉพาะสิทธิผู้ดูแลระบบ (Admin) เท่านั้นที่สามารถตั้งค่าการเชื่อมต่อ Google Services ได้',
+        text: 'เฉพาะสิทธิเจ้าหน้าที่ศาลและผู้ดูแลระบบเท่านั้นที่สามารถตั้งค่าการเชื่อมต่อ Google Services ได้',
         confirmButtonColor: '#1e3a8a'
       });
     }
