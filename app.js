@@ -8,7 +8,7 @@ if (typeof pdfjsLib !== 'undefined') {
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 }
 
-const SPREADSHEET_ID = '1Y-OA9B8cPRwTcILCB9lmLny2GrfcEnNqR5i07lTGDM4';
+const SPREADSHEET_ID = '1yoznW_FWEf5BLKOdqn110oTZj5zJg4KbsKsogoh-6g4';
 const DEFAULT_GOOGLE_SHEET_CSV = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/pub?output=csv`;
 const DEFAULT_GOOGLE_SCRIPT_WEBAPP = '';
 const DEFAULT_DRIVE_FOLDER_ID = '1l5ZDlXI14lgFc6WGqmZ3kQ9qB-ci-ArM';
@@ -312,18 +312,48 @@ function receiveOccasion(rawCase, holidays, newCap = null, actualDays = null, no
   return { ...rawCase, cap, cumulativeDays: newCumulativeDays, k: rawCase.k + 1, fileName: null, downloaded: false, courtFlag: null, uploadedAt: null, history };
 }
 
-function updateCap(rawCase, newCap) {
+function updateCap(rawCase, newCap, holidays = null, now = new Date()) {
   const cap = Number(newCap);
   if (cap !== 12 && cap !== 48 && cap !== 84) {
     return { case: rawCase, ok: false, reason: "ค่าเพดานฝากขังต้องเป็น 12 วัน, 48 วัน หรือ 84 วันเท่านั้น" };
   }
-  if (rawCase.k > 1 && cap === 12) {
-    return { case: rawCase, ok: false, reason: "ไม่สามารถลดเพดานเป็น 12 วัน (1 ครั้ง) ได้ เนื่องจากคดีดำเนินการถึงครั้งที่ " + rawCase.k + " แล้ว" };
+
+  const hList = holidays || getHolidays();
+  const maxK = cap === 12 ? 1 : (cap === 48 ? 4 : 7);
+
+  // Recalculate cumulative days based on the updated cap and current remand k
+  let cumulativeDays = rawCase.cumulativeDays ?? (12 * ((rawCase.k || 2) - 1));
+  
+  // If the new cap is reached or exceeded, mark case closed
+  let isClosed = rawCase.closed || false;
+  let closedDate = rawCase.closedDate || null;
+  if (rawCase.k >= maxK) {
+    isClosed = true;
+    if (!closedDate) closedDate = toISO(now);
+  } else {
+    // If cap was increased (e.g. from 12 to 48 or 48 to 84) on a closed case, reopen if k < maxK
+    if (rawCase.k < maxK && rawCase.closed) {
+      isClosed = false;
+      closedDate = null;
+    }
   }
-  if (rawCase.k > 4 && cap === 48) {
-    return { case: rawCase, ok: false, reason: "ไม่สามารถลดเพดานเป็น 48 วัน (4 ครั้ง) ได้ เนื่องจากคดีดำเนินการถึงครั้งที่ " + rawCase.k + " แล้ว" };
-  }
-  return { case: { ...rawCase, cap }, ok: true, reason: null };
+
+  // Recalculate occasion deadlines based on updated cap and cumulative days
+  const { rawDeadline, legalDeadline, filingDeadline, daysAvailable } = computeOccasionDeadlines(rawCase.startDate, cumulativeDays, hList);
+
+  const updatedCase = {
+    ...rawCase,
+    cap,
+    cumulativeDays,
+    closed: isClosed,
+    closedDate: closedDate,
+    legalDeadline,
+    filingDeadline,
+    rawDeadline,
+    daysAvailable
+  };
+
+  return { case: updatedCase, ok: true, reason: null };
 }
 
 function returnToPool(rawCase, reason, now = new Date()) {
@@ -434,8 +464,6 @@ function generateICS(cases, calendarName, now = new Date()) {
 // 4. DATA PERSISTENCE & LOCAL STORAGE ENGINE
 // --------------------------------------------------------------------------
 
-// SPEC ข้อ 3: ไม่มีบัญชีตั้งต้นฝังในโค้ด — ใช้ฟอร์ม "ตั้งค่าบัญชีแรกของระบบ" แทน
-// บทบาทในระบบมี 2 ระดับเท่านั้น: officer (เจ้าหน้าที่ศาล) + police (พนักงานสอบสวน)
 const DEFAULT_USERS = [];
 
 const DEFAULT_HOLIDAYS = [
@@ -452,7 +480,6 @@ const DEFAULT_HOLIDAYS = [
   { date: "2026-12-10", name: "วันรัฐธรรมนูญ" },
   { date: "2026-12-31", name: "วันสิ้นปี" }
 ];
-
 function initDatabase() {
   if (!localStorage.getItem('eredt_users')) {
     localStorage.setItem('eredt_users', JSON.stringify(DEFAULT_USERS));
@@ -463,12 +490,15 @@ function initDatabase() {
   if (!localStorage.getItem('eredt_holidays')) {
     localStorage.setItem('eredt_holidays', JSON.stringify(DEFAULT_HOLIDAYS));
   }
-  if (!localStorage.getItem('eredt_google_csv')) {
+  
+  const curCsv = localStorage.getItem('eredt_google_csv');
+  if (!curCsv || curCsv.includes('1Y-OA9B8cPRwTcILCB9lmLny2GrfcEnNqR5i07lTGDM4')) {
     localStorage.setItem('eredt_google_csv', DEFAULT_GOOGLE_SHEET_CSV);
   }
   if (!localStorage.getItem('eredt_google_script')) {
     localStorage.setItem('eredt_google_script', DEFAULT_GOOGLE_SCRIPT_WEBAPP);
   }
+  initRealtimeChannel();
 }
 
 function clearMockData() {
@@ -511,6 +541,26 @@ function getUsers() {
   return users;
 }
 
+const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes auto-sync interval
+let autoSyncTimerId = null;
+
+function startAutoSyncTimer() {
+  if (autoSyncTimerId) clearInterval(autoSyncTimerId);
+  autoSyncTimerId = setInterval(() => {
+    if (currentUser) {
+      console.log('[e-REDT Police] 10-minute periodic auto-sync running...');
+      fetchLiveGoogleSheetData({ isAutoRefresh: true });
+    }
+  }, AUTO_SYNC_INTERVAL_MS);
+}
+
+function stopAutoSyncTimer() {
+  if (autoSyncTimerId) {
+    clearInterval(autoSyncTimerId);
+    autoSyncTimerId = null;
+  }
+}
+
 function syncToGoogleSheet(actionName, payload) {
   const scriptUrl = localStorage.getItem('eredt_google_script');
   if (!scriptUrl) return;
@@ -521,9 +571,118 @@ function syncToGoogleSheet(actionName, payload) {
       mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: actionName, ...payload })
-    }).catch(err => console.warn('Google Sheet Sync warning:', err));
+    }).then(() => {
+      // Immediate background re-sync to ensure local cache matches Sheet
+      setTimeout(() => {
+        if (typeof fetchLiveGoogleSheetData === 'function') {
+          fetchLiveGoogleSheetData({ isAutoRefresh: true });
+        }
+      }, 1200);
+    }).catch(err => {
+      console.warn('Google Sheet Sync warning:', err);
+    });
   } catch (e) {
     console.warn('Google Sheet Sync error:', e);
+  }
+}
+
+// --------------------------------------------------------------------------
+// REALTIME MESSAGE BUS (HTML5 BroadcastChannel + Storage Event Fallback)
+// --------------------------------------------------------------------------
+let realtimeChannel = null;
+
+function initRealtimeChannel() {
+  if (typeof BroadcastChannel !== 'undefined') {
+    try {
+      if (!realtimeChannel) {
+        realtimeChannel = new BroadcastChannel('eredt_realtime_bus');
+        realtimeChannel.onmessage = (event) => {
+          handleRealtimeMessage(event.data);
+        };
+      }
+    } catch (e) {
+      console.warn('BroadcastChannel initialization error:', e);
+    }
+  }
+
+  // Storage Event listener as cross-tab/cross-window fallback
+  window.addEventListener('storage', (e) => {
+    if (e.key === 'eredt_requests' || e.key === 'eredt_users' || e.key === 'eredt_holidays') {
+      handleRealtimeMessage({ type: 'STORAGE_EVENT', key: e.key, timestamp: Date.now() });
+    }
+  });
+}
+
+function broadcastRealtimeUpdate(type, payload = {}) {
+  const msg = { type, payload, timestamp: Date.now(), sender: currentUser?.role || 'police' };
+  if (realtimeChannel) {
+    try {
+      realtimeChannel.postMessage(msg);
+    } catch (e) {
+      console.warn('BroadcastChannel post error:', e);
+    }
+  }
+}
+
+let realtimeToastTimeout = null;
+function showRealtimeToast(text) {
+  let toast = document.getElementById('realtimeToastNotification');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'realtimeToastNotification';
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: rgba(15, 23, 42, 0.92);
+      color: #38bdf8;
+      padding: 10px 18px;
+      border-radius: 9999px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 99999;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      pointer-events: none;
+    `;
+    document.body.appendChild(toast);
+  }
+
+  toast.innerHTML = `<i class="fa-solid fa-bolt" style="color: #fbbf24;"></i> <span>${text || 'อัปเดตข้อมูลสดแบบ Realtime เรียบร้อย'}</span>`;
+  toast.style.opacity = '1';
+  toast.style.transform = 'translateY(0)';
+
+  if (realtimeToastTimeout) clearTimeout(realtimeToastTimeout);
+  realtimeToastTimeout = setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateY(20px)';
+  }, 2200);
+}
+
+function handleRealtimeMessage(msg) {
+  if (!msg) return;
+  console.log('[e-REDT Realtime Bus] Received update:', msg);
+  
+  if (currentUser) {
+    if (typeof refreshActiveView === 'function') {
+      refreshActiveView();
+    } else {
+      if (typeof currentActiveView !== 'undefined') {
+        if (currentActiveView === 'dashboard' && typeof renderDashboard === 'function') renderDashboard();
+        else if (currentActiveView === 'requests') {
+          if (currentUser.role === 'police' && typeof renderPoliceView === 'function') renderPoliceView();
+          else if (typeof renderCourtView === 'function') renderCourtView();
+        }
+      }
+    }
+    showRealtimeToast('⚡ ข้อมูลอัปเดตแบบ Realtime แล้ว');
   }
 }
 
@@ -531,6 +690,7 @@ function saveUsers(users) {
   const validUsers = (users || []).filter(u => u && u.username && String(u.username).trim() !== '');
   localStorage.setItem('eredt_users', JSON.stringify(validUsers));
   syncToGoogleSheet('saveUsers', { users: validUsers });
+  broadcastRealtimeUpdate('USERS_UPDATED');
 }
 
 function getRequests() {
@@ -538,6 +698,14 @@ function getRequests() {
   // Sanitize existing cases if any contain invalid date strings
   let modified = false;
   reqs.forEach(r => {
+    if (r.remandHistory && Array.isArray(r.remandHistory)) {
+      r.remandHistory.forEach(h => {
+        if (h.requestedDate && isNaN(new Date(h.requestedDate).getTime())) {
+          h.requestedDate = toISO(new Date());
+          modified = true;
+        }
+      });
+    }
     if (!r.startDate || r.startDate.includes('NaN')) {
       r.startDate = toISO(new Date());
       modified = true;
@@ -550,6 +718,7 @@ function getRequests() {
 function saveRequests(requests) {
   localStorage.setItem('eredt_requests', JSON.stringify(requests));
   syncToGoogleSheet('saveRequests', { requests });
+  broadcastRealtimeUpdate('REQUESTS_UPDATED');
 }
 
 function getHolidays() {
@@ -559,6 +728,7 @@ function getHolidays() {
 function saveHolidays(holidays) {
   localStorage.setItem('eredt_holidays', JSON.stringify(holidays));
   syncToGoogleSheet('saveHolidays', { holidays });
+  broadcastRealtimeUpdate('HOLIDAYS_UPDATED');
 }
 
 // Global Application State
@@ -681,10 +851,9 @@ function checkSession() {
 
   if (currentUser) {
     renderAppLayout();
-    // Only auto-sync live data from Google Sheet on refresh if user is logged in AND is ADMIN
-    if (currentUser.role === 'officer' || currentUser.role === 'admin') {
-      fetchLiveGoogleSheetData({ isAutoRefresh: true });
-    }
+    startAutoSyncTimer();
+    // Auto-sync live data from Google Sheet on refresh/load for ALL logged in users (police and court)
+    fetchLiveGoogleSheetData({ isAutoRefresh: true });
   } else {
     showLoginView();
   }
@@ -789,6 +958,7 @@ function quickLogin(roleOrUser) {
 }
 
 function handleLogout() {
+  stopAutoSyncTimer();
   currentUser = null;
   sessionStorage.removeItem('eredt_session');
   sessionStorage.removeItem('eredt_last_view');
@@ -935,13 +1105,14 @@ function switchView(viewName, event, subTab) {
   setElementDisplay('requestsView', 'none');
   setElementDisplay('adminView', 'none');
 
-  setElementClass('navItemDashboard', 'active', false);
-  setElementClass('navItemRequests', 'active', false);
-  setElementClass('navItemUsersLink', 'active', false);
+  // Reset ALL sidebar navigation items
+  document.querySelectorAll('.sidebar-item').forEach(el => {
+    el.classList.remove('active');
+  });
 
-  // Clear Mobile Bottom Nav Active Classes
-  ['mbNavDashboard', 'mbNavRequests', 'mbNavQuickUpload', 'mbNavInbox', 'mbNavCreateBatch', 'mbNavAdmin'].forEach(id => {
-    setElementClass(id, 'active', false);
+  // Reset ALL mobile bottom navigation items
+  document.querySelectorAll('.bnav-item').forEach(el => {
+    el.classList.remove('active');
   });
 
   if (viewName === 'dashboard') {
@@ -951,10 +1122,6 @@ function switchView(viewName, event, subTab) {
     renderDashboard();
   } else if (viewName === 'requests') {
     setElementDisplay('requestsView', 'block');
-    setElementClass('navItemRequests', 'active', false);
-    setElementClass('navItemStationInbox', 'active', false);
-    setElementClass('mbNavRequests', 'active', false);
-    setElementClass('mbNavInbox', 'active', false);
 
     if (currentUser && currentUser.role === 'police') {
       setElementDisplay('policeRequestsSection', 'block');
@@ -1018,6 +1185,8 @@ function switchView(viewName, event, subTab) {
     } else {
       setElementDisplay('policeRequestsSection', 'none');
       setElementDisplay('courtRequestsSection', 'block');
+      setElementClass('navItemRequests', 'active', true);
+      setElementClass('mbNavRequests', 'active', true);
       renderCourtView();
     }
   } else if (viewName === 'admin') {
@@ -2172,31 +2341,29 @@ function openEditCapModal(caseNumber) {
   const c = requests.find(r => r.caseNumber === caseNumber);
   if (!c) return;
 
-  const isOverK4 = (c.k > 4);
-  let optionsHtml = '';
-  if (isOverK4) {
-    optionsHtml = `<option value="84" selected>84 วัน (ฝากขังได้สูงสุด 7 ครั้ง ครั้งละ 12 วัน)</option>`;
-  } else {
-    optionsHtml = `
-      <option value="84" ${c.cap === 84 ? 'selected' : ''}>84 วัน (คดีอัตราโทษสูง - สูงสุด 7 ครั้ง ครั้งละ 12 วัน)</option>
-      <option value="48" ${c.cap === 48 ? 'selected' : ''}>48 วัน (คดีทั่วไป - สูงสุด 4 ครั้ง ครั้งละ 12 วัน)</option>
-    `;
-  }
+  const currentCap = c.cap || 84;
+  const currentTimes = currentCap === 12 ? 1 : (currentCap === 48 ? 4 : 7);
+
+  const optionsHtml = `
+    <option value="12" ${currentCap === 12 ? 'selected' : ''}>12 วัน (ฝากขังครั้งเดียว - สูงสุด 1 ครั้ง ครั้งละ 12 วัน)</option>
+    <option value="48" ${currentCap === 48 ? 'selected' : ''}>48 วัน (คดีทั่วไป - สูงสุด 4 ครั้ง ครั้งละ 12 วัน)</option>
+    <option value="84" ${currentCap === 84 ? 'selected' : ''}>84 วัน (คดีอัตราโทษสูง - สูงสุด 7 ครั้ง ครั้งละ 12 วัน)</option>
+  `;
 
   Swal.fire({
     title: `แก้ไขเพดานฝากขัง: ${c.caseNumber}`,
     html: `
       <div style="text-align: left; font-size: 0.9rem;">
-        <p style="margin-bottom: 0.5rem;"><b>สถานะปัจจุบัน:</b> ครั้งที่ ${c.k} | เพดานปัจจุบัน: <b>${c.cap || 84} วัน</b></p>
-        ${isOverK4 ? '<p style="color: #dc2626; font-size: 0.8rem; margin-bottom: 0.5rem;"><i class="fa-solid fa-triangle-exclamation"></i> คดีดำเนินการถึงครั้งที่ ' + c.k + ' แล้ว จึงไม่สามารถลดเพดานเป็น 48 วัน (4 ครั้ง) ได้</p>' : ''}
-        <label style="font-weight: 600; display: block; margin-top: 0.75rem; margin-bottom: 0.25rem;">เลือกเพดานฝากขังใหม่:</label>
+        <p style="margin-bottom: 0.5rem;"><b>สถานะปัจจุบัน:</b> ครั้งที่ ${c.k} | เพดานปัจจุบัน: <b>${currentCap} วัน (${currentTimes} ครั้ง)</b></p>
+        <p style="color: #0284c7; font-size: 0.8rem; margin-bottom: 0.75rem;"><i class="fa-solid fa-calculator"></i> เมื่อปรับเพดานฝากขัง ระบบจะคำนวณวันและกำหนดนัดใหม่ให้โดยอัตโนมัติ</p>
+        <label style="font-weight: 600; display: block; margin-top: 0.5rem; margin-bottom: 0.25rem;">เลือกเพดานฝากขังใหม่ (ขั้นต่ำ 12 วัน):</label>
         <select id="swalEditCapSelect" class="form-control" style="width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 0.4rem;">
           ${optionsHtml}
         </select>
       </div>
     `,
     showCancelButton: true,
-    confirmButtonText: 'บันทึกการแก้ไข',
+    confirmButtonText: 'บันทึกและคำนวณวันใหม่',
     cancelButtonText: 'ยกเลิก',
     confirmButtonColor: '#1e3a8a',
     preConfirm: () => {
@@ -2212,7 +2379,13 @@ function openEditCapModal(caseNumber) {
         if (updateRes.ok) {
           requests[reqIndex] = updateRes.case;
           saveRequests(requests);
-          Swal.fire({ icon: 'success', title: 'แก้ไขเพดานเรียบร้อย', timer: 1200, showConfirmButton: false });
+          Swal.fire({
+            icon: 'success',
+            title: 'ปรับเพดานและคำนวณวันใหม่เรียบร้อย',
+            html: `ปรับเพดานเป็น <b>${newCap} วัน</b> และคำนวณกำหนดวันนัดใหม่เรียบร้อยแล้ว`,
+            timer: 1500,
+            showConfirmButton: false
+          });
           if (typeof currentActiveView !== 'undefined' && currentActiveView === 'dashboard') renderDashboard();
           else renderCourtView();
         } else {
@@ -2379,17 +2552,14 @@ function openReceiveModal(caseNumber) {
   setElementText('receiveCaseNumberDisplay', `เลขคดี: ${c.caseNumber}`);
   setElementText('receiveCaseInfoDisplay', `ครั้งที่ ${c.k} | สภ.: ${c.station || 'ไม่ระบุ'}`);
 
-  // SPEC ข้อ 5.6-4: ถ้าครั้งปัจจุบัน k > 4 ตัวเลือกเพดาน 48 วันจะหายไปจากหน้าจอ
+  // กำหนดตัวเลือกเพดานฝากขัง (ขั้นต่ำ 12 วัน)
   const capSelect = document.getElementById('receiveCapSelect');
   if (capSelect) {
-    if (c.k > 4) {
-      capSelect.innerHTML = `<option value="84">84 วัน (คดีอัตราโทษสูง - ฝากขังได้สูงสุด 7 ครั้ง ครั้งละ 12 วัน)</option>`;
-    } else {
-      capSelect.innerHTML = `
-        <option value="84">84 วัน (คดีอัตราโทษสูง - ฝากขังได้สูงสุด 7 ครั้ง ครั้งละ 12 วัน)</option>
-        <option value="48">48 วัน (คดีทั่วไป - ฝากขังได้สูงสุด 4 ครั้ง ครั้งละ 12 วัน)</option>
-      `;
-    }
+    capSelect.innerHTML = `
+      <option value="12">12 วัน (ฝากขังครั้งเดียว - สูงสุด 1 ครั้ง ครั้งละ 12 วัน)</option>
+      <option value="48">48 วัน (คดีทั่วไป - ฝากขังได้สูงสุด 4 ครั้ง ครั้งละ 12 วัน)</option>
+      <option value="84">84 วัน (คดีอัตราโทษสูง - ฝากขังได้สูงสุด 7 ครั้ง ครั้งละ 12 วัน)</option>
+    `;
   }
 
   setElementValue('receiveCapSelect', c.cap || 84);

@@ -116,6 +116,11 @@
             <h2 id="dashboardTitle"><i class="fa-solid fa-chart-line" style="color: var(--primary);"></i> แดชบอร์ดกำหนดวันยื่นฝากขัง - ตำรวจ</h2>
             <p id="dashboardSubtitle">ติดตามกำหนดเวลาสำหรับ สภ.: สภ.เมืองอุดรธานี</p>
           </div>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button onclick="fetchLiveGoogleSheetData({ isManual: true })" class="btn-secondary" style="width: auto;">
+              <i class="fa-solid fa-arrows-rotate"></i> ซิงค์ข้อมูลล่าสุด
+            </button>
+          </div>
         </div>
 
         <!-- Top Stats Grid -->
@@ -202,7 +207,10 @@
               <h2><i class="fa-solid fa-building-shield" style="color: var(--primary);"></i> รายการคดียื่นคำร้องขอฝากขัง</h2>
               <p id="policeStationSub">สังกัด: สภ.เมืองอุดรธานี</p>
             </div>
-            <div style="display: flex; gap: 0.5rem;">
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button onclick="fetchLiveGoogleSheetData({ isManual: true })" class="btn-secondary" style="width: auto;">
+                <i class="fa-solid fa-arrows-rotate"></i> ซิงค์ข้อมูลล่าสุด
+              </button>
               <button onclick="downloadPersonalICS(event)" class="btn-secondary" style="width: auto;">
                 <i class="fa-solid fa-calendar-arrow-down"></i> ดาวน์โหลดปฏิทิน .ics
               </button>
@@ -394,6 +402,6 @@
   </div>
 
   <!-- System JavaScript -->
-  <script src="app.js"></script>
+  <script src="app.js?v=2.0.3"></script>
 </body>
 </html>
