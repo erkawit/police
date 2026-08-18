@@ -626,23 +626,108 @@ function clearMockData() {
   });
 }
 
+// --------------------------------------------------------------------------
+// IN-MEMORY STATE CACHING & TTL REFRESH ENGINE
+// --------------------------------------------------------------------------
+let inMemoryRequests = null;
+let inMemoryUsers = null;
+let inMemoryHolidays = null;
+
+const CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes Cache TTL
+const AUTO_SYNC_INTERVAL_MS = 3 * 60 * 1000; // 3 minutes background polling
+
+function invalidateInMemoryCache() {
+  inMemoryRequests = null;
+  inMemoryUsers = null;
+  inMemoryHolidays = null;
+}
+
 function getUsers() {
+  if (inMemoryUsers && Array.isArray(inMemoryUsers) && inMemoryUsers.length > 0) {
+    return inMemoryUsers;
+  }
   let users = JSON.parse(localStorage.getItem('eredt_users') || '[]');
   if (!Array.isArray(users)) {
     users = [];
   }
   users = users.filter(u => u && u.username && String(u.username).trim() !== '');
-  return users;
+  inMemoryUsers = users;
+  return inMemoryUsers;
+}
+
+function saveUsers(users) {
+  const validUsers = (users || []).filter(u => u && u.username && String(u.username).trim() !== '');
+  inMemoryUsers = validUsers;
+  localStorage.setItem('eredt_users', JSON.stringify(validUsers));
+  if (validUsers.length > 0) {
+    syncToGoogleSheet('saveUsers', { users: validUsers });
+  }
+  broadcastRealtimeUpdate('USERS_UPDATED');
+}
+
+function getRequests() {
+  if (inMemoryRequests && Array.isArray(inMemoryRequests)) {
+    return inMemoryRequests;
+  }
+  const reqs = JSON.parse(localStorage.getItem('eredt_requests') || '[]');
+  // Sanitize existing cases if any contain invalid date strings
+  let modified = false;
+  reqs.forEach(r => {
+    if (r.remandHistory && Array.isArray(r.remandHistory)) {
+      r.remandHistory.forEach(h => {
+        if (h.requestedDate && isNaN(new Date(h.requestedDate).getTime())) {
+          h.requestedDate = toISO(new Date());
+          modified = true;
+        }
+      });
+    }
+    if (!r.startDate || r.startDate.includes('NaN')) {
+      r.startDate = toISO(new Date());
+      modified = true;
+    }
+  });
+  if (modified) {
+    localStorage.setItem('eredt_requests', JSON.stringify(reqs));
+  }
+  inMemoryRequests = reqs;
+  return inMemoryRequests;
+}
+
+function saveRequests(requests) {
+  inMemoryRequests = requests || [];
+  localStorage.setItem('eredt_requests', JSON.stringify(inMemoryRequests));
+  if (inMemoryRequests && inMemoryRequests.length > 0) {
+    syncToGoogleSheet('saveRequests', { requests: inMemoryRequests });
+  }
+  broadcastRealtimeUpdate('REQUESTS_UPDATED');
+}
+
+function getHolidays() {
+  if (inMemoryHolidays && Array.isArray(inMemoryHolidays)) {
+    return inMemoryHolidays;
+  }
+  inMemoryHolidays = JSON.parse(localStorage.getItem('eredt_holidays') || JSON.stringify(DEFAULT_HOLIDAYS));
+  return inMemoryHolidays;
+}
+
+function saveHolidays(holidays) {
+  inMemoryHolidays = holidays || [];
+  localStorage.setItem('eredt_holidays', JSON.stringify(inMemoryHolidays));
+  if (inMemoryHolidays && inMemoryHolidays.length > 0) {
+    syncToGoogleSheet('saveHolidays', { holidays: inMemoryHolidays });
+  }
+  broadcastRealtimeUpdate('HOLIDAYS_UPDATED');
 }
 
 let autoSyncTimerId = null;
 
 function startAutoSyncTimer() {
-  // Auto-sync timer disabled per user request
-  if (autoSyncTimerId) {
-    clearInterval(autoSyncTimerId);
-    autoSyncTimerId = null;
-  }
+  stopAutoSyncTimer();
+  autoSyncTimerId = setInterval(() => {
+    if (currentUser && document.visibilityState !== 'hidden' && !isSyncingData) {
+      fetchLiveGoogleSheetData({ isSilent: true });
+    }
+  }, AUTO_SYNC_INTERVAL_MS);
 }
 
 function stopAutoSyncTimer() {
@@ -651,6 +736,26 @@ function stopAutoSyncTimer() {
     autoSyncTimerId = null;
   }
 }
+
+function checkAndAutoRefreshCache(force = false) {
+  if (!currentUser || isSyncingData) return;
+  const lastSync = Number(localStorage.getItem('eredt_last_sync') || 0);
+  if (force || Date.now() - lastSync > CACHE_TTL_MS) {
+    fetchLiveGoogleSheetData({ isSilent: true });
+  }
+}
+
+// Auto-check Cache TTL when user switches back to this browser tab
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentUser) {
+    checkAndAutoRefreshCache();
+  }
+});
+window.addEventListener('focus', () => {
+  if (currentUser) {
+    checkAndAutoRefreshCache();
+  }
+});
 
 function syncToGoogleSheet(actionName, payload) {
   const scriptUrl = localStorage.getItem('eredt_google_script');
@@ -754,6 +859,9 @@ function handleRealtimeMessage(msg) {
   if (!msg) return;
   console.log('[e-REDT Realtime Bus] Received update:', msg);
   
+  // Invalidate In-Memory state so next read gets fresh data
+  invalidateInMemoryCache();
+
   if (currentUser) {
     if (typeof refreshActiveView === 'function') {
       refreshActiveView();
@@ -768,57 +876,6 @@ function handleRealtimeMessage(msg) {
     }
     showRealtimeToast('⚡ ข้อมูลอัปเดตแบบ Realtime แล้ว');
   }
-}
-
-function saveUsers(users) {
-  const validUsers = (users || []).filter(u => u && u.username && String(u.username).trim() !== '');
-  localStorage.setItem('eredt_users', JSON.stringify(validUsers));
-  if (validUsers.length > 0) {
-    syncToGoogleSheet('saveUsers', { users: validUsers });
-  }
-  broadcastRealtimeUpdate('USERS_UPDATED');
-}
-
-function getRequests() {
-  const reqs = JSON.parse(localStorage.getItem('eredt_requests') || '[]');
-  // Sanitize existing cases if any contain invalid date strings
-  let modified = false;
-  reqs.forEach(r => {
-    if (r.remandHistory && Array.isArray(r.remandHistory)) {
-      r.remandHistory.forEach(h => {
-        if (h.requestedDate && isNaN(new Date(h.requestedDate).getTime())) {
-          h.requestedDate = toISO(new Date());
-          modified = true;
-        }
-      });
-    }
-    if (!r.startDate || r.startDate.includes('NaN')) {
-      r.startDate = toISO(new Date());
-      modified = true;
-    }
-  });
-  if (modified) saveRequests(reqs);
-  return reqs;
-}
-
-function saveRequests(requests) {
-  localStorage.setItem('eredt_requests', JSON.stringify(requests));
-  if (requests && requests.length > 0) {
-    syncToGoogleSheet('saveRequests', { requests });
-  }
-  broadcastRealtimeUpdate('REQUESTS_UPDATED');
-}
-
-function getHolidays() {
-  return JSON.parse(localStorage.getItem('eredt_holidays') || JSON.stringify(DEFAULT_HOLIDAYS));
-}
-
-function saveHolidays(holidays) {
-  localStorage.setItem('eredt_holidays', JSON.stringify(holidays));
-  if (holidays && holidays.length > 0) {
-    syncToGoogleSheet('saveHolidays', { holidays });
-  }
-  broadcastRealtimeUpdate('HOLIDAYS_UPDATED');
 }
 
 // Global Application State
@@ -1104,6 +1161,7 @@ function quickLogin(roleOrUser) {
 function handleLogout() {
   if (typeof closeUserDropdown === 'function') closeUserDropdown();
   stopAutoSyncTimer();
+  invalidateInMemoryCache();
   currentUser = null;
   sessionStorage.removeItem('eredt_session');
   sessionStorage.removeItem('eredt_last_view');
@@ -1212,6 +1270,11 @@ function renderAppLayout() {
 
   // Sync Button visible for all court officers
   setElementDisplay('btnSyncGoogleSheet', isCourt ? 'inline-flex' : 'none');
+
+  // Start background auto-sync timer
+  startAutoSyncTimer();
+  // Check if cache TTL has expired
+  checkAndAutoRefreshCache();
 
   // Restore Last Active View on Refresh
   let hashView = '';
@@ -3769,11 +3832,13 @@ async function fetchLiveGoogleSheetData(options = {}) {
   isSyncingData = true;
 
   const isManual = options.isManual || false;
+  const isSilent = options.isSilent || false;
   const startTime = Date.now();
   const thresholdMs = 450; // Threshold: Only show SweetAlert if load takes longer than 450ms or on manual click
   let hasOpenedSwal = false;
 
   function updateProgress(percent, label) {
+    if (isSilent) return; // Silent background fetch never shows modal
     if (!hasOpenedSwal && (isManual || Date.now() - startTime > thresholdMs)) {
       hasOpenedSwal = true;
       Swal.fire({
@@ -3875,11 +3940,14 @@ async function fetchLiveGoogleSheetData(options = {}) {
     updateProgress(95, 'กำลังอัพเดทระบบ...');
 
     if (Array.isArray(requestsData)) {
+      inMemoryRequests = requestsData;
       localStorage.setItem('eredt_requests', JSON.stringify(requestsData));
     }
 
     if (Array.isArray(usersData) && usersData.length > 0) {
-      saveUsers(usersData);
+      const validUsers = usersData.filter(u => u && u.username && String(u.username).trim() !== '');
+      inMemoryUsers = validUsers;
+      localStorage.setItem('eredt_users', JSON.stringify(validUsers));
     }
 
     if (Array.isArray(holidaysData) && holidaysData.length > 0) {
@@ -3887,8 +3955,11 @@ async function fetchLiveGoogleSheetData(options = {}) {
         date: toISO(h.date),
         name: String(h.name || '').trim()
       })).filter(h => h.date && !h.date.includes('NaN'));
+      inMemoryHolidays = normalizedHolidays;
       localStorage.setItem('eredt_holidays', JSON.stringify(normalizedHolidays));
     }
+
+    localStorage.setItem('eredt_last_sync', Date.now().toString());
 
     updateProgress(100, 'ดึงข้อมูลสำเร็จ!');
 
@@ -3903,6 +3974,8 @@ async function fetchLiveGoogleSheetData(options = {}) {
           showConfirmButton: false
         });
       }, 250);
+    } else if (isSilent) {
+      showRealtimeToast('⚡ ซิงค์ข้อมูลล่าสุดจาก Google Sheet เรียบร้อย');
     }
   } catch (err) {
     console.warn('Fetch live data notice:', err);
