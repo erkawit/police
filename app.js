@@ -1102,6 +1102,7 @@ function quickLogin(roleOrUser) {
 }
 
 function handleLogout() {
+  if (typeof closeUserDropdown === 'function') closeUserDropdown();
   stopAutoSyncTimer();
   currentUser = null;
   sessionStorage.removeItem('eredt_session');
@@ -1168,6 +1169,12 @@ function renderAppLayout() {
   setElementDisplay('appLayoutContainer', 'flex');
 
   setElementText('userName', currentUser.name || '');
+  setElementText('userDropdownName', currentUser.name || currentUser.username || 'พนักงานสอบสวน');
+  setElementText('userDropdownUsername', '@' + (currentUser.username || ''));
+  if (document.getElementById('userAvatar')) {
+    const initial = (currentUser.name ? currentUser.name.trim().charAt(0).toUpperCase() : (currentUser.role === 'police' ? 'P' : 'C'));
+    setElementText('userAvatar', initial);
+  }
 
   const roleNames = { admin: 'ผู้ดูแลระบบ', officer: 'เจ้าหน้าที่ศาล', police: 'พนักงานสอบสวน' };
   setElementText('userRoleBadge', roleNames[currentUser.role] || currentUser.role);
@@ -4452,3 +4459,301 @@ window.addEventListener('resize', () => {
     }
   }, 250);
 });
+
+// --------------------------------------------------------------------------
+// USER PROFILE DROPDOWN & CHANGE PASSWORD
+// --------------------------------------------------------------------------
+
+function toggleUserDropdown(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const wrapper = document.querySelector('.user-menu-wrapper');
+  const dropdown = document.getElementById('userDropdownMenu');
+  if (!dropdown) return;
+
+  const isHidden = (dropdown.style.display === 'none' || dropdown.style.display === '');
+  if (isHidden) {
+    if (currentUser) {
+      setElementText('userDropdownName', currentUser.name || currentUser.username || 'พนักงานสอบสวน');
+      setElementText('userDropdownUsername', '@' + (currentUser.username || ''));
+    }
+    dropdown.style.display = 'block';
+    if (wrapper) wrapper.classList.add('active');
+  } else {
+    dropdown.style.display = 'none';
+    if (wrapper) wrapper.classList.remove('active');
+  }
+}
+window.toggleUserDropdown = toggleUserDropdown;
+
+function closeUserDropdown() {
+  const wrapper = document.querySelector('.user-menu-wrapper');
+  const dropdown = document.getElementById('userDropdownMenu');
+  if (dropdown) dropdown.style.display = 'none';
+  if (wrapper) wrapper.classList.remove('active');
+}
+window.closeUserDropdown = closeUserDropdown;
+
+// Close user dropdown when clicking outside
+document.addEventListener('click', function(e) {
+  const wrapper = document.querySelector('.user-menu-wrapper');
+  const dropdown = document.getElementById('userDropdownMenu');
+  if (dropdown && dropdown.style.display !== 'none') {
+    if (wrapper && !wrapper.contains(e.target)) {
+      dropdown.style.display = 'none';
+      wrapper.classList.remove('active');
+    }
+  }
+});
+
+function toggleSwalPwd(inputId, btnEl) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const isPassword = (input.type === 'password');
+  input.type = isPassword ? 'text' : 'password';
+  const icon = btnEl ? btnEl.querySelector('i') : null;
+  if (icon) {
+    icon.className = isPassword ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+  }
+}
+window.toggleSwalPwd = toggleSwalPwd;
+
+function openChangePasswordModal(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  if (typeof closeUserDropdown === 'function') closeUserDropdown();
+
+  if (!currentUser) {
+    Swal.fire({
+      icon: 'error',
+      title: 'ไม่พบบัญชีผู้ใช้',
+      text: 'กรุณาเข้าสู่ระบบก่อนเปลี่ยนรหัสผ่าน'
+    });
+    return;
+  }
+
+  const currentPwd = (currentUser.password !== undefined && currentUser.password !== null) ? String(currentUser.password) : '';
+  const escapedCurrentPwd = currentPwd.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const htmlContent = `
+    <div style="text-align: left; font-family: 'Prompt', 'Sarabun', sans-serif;">
+      <!-- 1. รหัสผ่านเดิม (Disabled) -->
+      <div style="margin-bottom: 1rem;">
+        <label style="display: flex; justify-content: space-between; align-items: center; font-size: 0.85rem; font-weight: 600; color: #334155; margin-bottom: 0.35rem;">
+          <span><i class="fa-solid fa-lock" style="color: #64748b;"></i> รหัสผ่านเดิม (Current Password)</span>
+          <span style="font-size: 0.725rem; font-weight: normal; color: #64748b; background: #e2e8f0; padding: 0.1rem 0.45rem; border-radius: 4px;">รหัสเดิมที่ใช้งานอยู่</span>
+        </label>
+        <div style="position: relative; display: flex; align-items: center;">
+          <input type="password" id="swalCurPwd" value="${escapedCurrentPwd}" disabled readonly style="width: 100%; padding: 0.55rem 2.5rem 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; background: #f1f5f9; color: #64748b; cursor: not-allowed; font-size: 0.9rem; box-sizing: border-box;">
+          <button type="button" onclick="toggleSwalPwd('swalCurPwd', this)" style="position: absolute; right: 8px; background: transparent; border: none; color: #64748b; cursor: pointer; padding: 4px; font-size: 0.95rem;">
+            <i class="fa-solid fa-eye"></i>
+          </button>
+        </div>
+      </div>
+
+      <!-- 2. รหัสผ่านใหม่ -->
+      <div style="margin-bottom: 0.65rem;">
+        <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #334155; margin-bottom: 0.35rem;">
+          <i class="fa-solid fa-shield-halved" style="color: #0284c7;"></i> รหัสผ่านใหม่ (New Password) <span style="color: #dc2626;">*</span>
+        </label>
+        <div style="position: relative; display: flex; align-items: center;">
+          <input type="password" id="swalNewPwd" placeholder="ป้อนรหัสผ่านใหม่ (ภาษาอังกฤษเท่านั้น)" autocomplete="new-password" style="width: 100%; padding: 0.55rem 2.5rem 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+          <button type="button" onclick="toggleSwalPwd('swalNewPwd', this)" style="position: absolute; right: 8px; background: transparent; border: none; color: #64748b; cursor: pointer; padding: 4px; font-size: 0.95rem;">
+            <i class="fa-solid fa-eye"></i>
+          </button>
+        </div>
+        <div id="swalNewPwdWarn" style="display: none; color: #dc2626; font-size: 0.75rem; margin-top: 0.25rem; font-weight: 500;">
+          <i class="fa-solid fa-triangle-exclamation"></i> อนุญาตให้พิมพ์เฉพาะตัวอักษรภาษาอังกฤษ ตัวเลข และอักขระพิเศษเท่านั้น (ห้ามใช้ภาษาไทย)
+        </div>
+      </div>
+
+      <!-- 3. เงื่อนไขความปลอดภัย (Interactive Checklist) -->
+      <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 0.65rem 0.85rem; margin-bottom: 0.85rem; font-size: 0.775rem;">
+        <div style="font-weight: 600; color: #475569; margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.35rem;">
+          <i class="fa-solid fa-circle-info" style="color: #0284c7;"></i> เงื่อนไขความปลอดภัยของรหัสผ่าน:
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem 0.5rem;">
+          <div id="swalReqLen" style="color: #64748b;"><i class="fa-solid fa-circle-xmark" style="color: #94a3b8;"></i> 8 ตัวอักษรขึ้นไป</div>
+          <div id="swalReqUpper" style="color: #64748b;"><i class="fa-solid fa-circle-xmark" style="color: #94a3b8;"></i> พิมพ์ใหญ่ (A-Z)</div>
+          <div id="swalReqLower" style="color: #64748b;"><i class="fa-solid fa-circle-xmark" style="color: #94a3b8;"></i> พิมพ์เล็ก (a-z)</div>
+          <div id="swalReqNum" style="color: #64748b;"><i class="fa-solid fa-circle-xmark" style="color: #94a3b8;"></i> ตัวเลข (0-9)</div>
+          <div id="swalReqSpecial" style="grid-column: span 2; color: #64748b;"><i class="fa-solid fa-circle-xmark" style="color: #94a3b8;"></i> อักขระพิเศษ (!@#$%^&*()_+-= เป็นต้น)</div>
+          <div id="swalReqEnOnly" style="grid-column: span 2; color: #64748b;"><i class="fa-solid fa-circle-xmark" style="color: #94a3b8;"></i> ภาษาอังกฤษเท่านั้น (ห้ามมีภาษาไทย)</div>
+        </div>
+      </div>
+
+      <!-- 4. ยืนยันรหัสผ่านใหม่อีกครั้ง -->
+      <div style="margin-bottom: 0.25rem;">
+        <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #334155; margin-bottom: 0.35rem;">
+          <i class="fa-solid fa-check-double" style="color: #059669;"></i> ยืนยันรหัสผ่านใหม่อีกครั้ง (Confirm Password) <span style="color: #dc2626;">*</span>
+        </label>
+        <div style="position: relative; display: flex; align-items: center;">
+          <input type="password" id="swalConfirmPwd" placeholder="ป้อนรหัสผ่านใหม่อีกครั้ง" autocomplete="new-password" style="width: 100%; padding: 0.55rem 2.5rem 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; font-size: 0.9rem; box-sizing: border-box;">
+          <button type="button" onclick="toggleSwalPwd('swalConfirmPwd', this)" style="position: absolute; right: 8px; background: transparent; border: none; color: #64748b; cursor: pointer; padding: 4px; font-size: 0.95rem;">
+            <i class="fa-solid fa-eye"></i>
+          </button>
+        </div>
+        <div id="swalConfirmMatchMsg" style="display: none; font-size: 0.75rem; margin-top: 0.25rem; font-weight: 500;"></div>
+      </div>
+    </div>
+  `;
+
+  Swal.fire({
+    title: '<i class="fa-solid fa-key" style="color: #eab308;"></i> เปลี่ยนรหัสผ่านผู้ใช้งาน',
+    html: htmlContent,
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-floppy-disk"></i> ยืนยันเปลี่ยนรหัสผ่าน',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#1e3a8a',
+    cancelButtonColor: '#64748b',
+    width: '460px',
+    focusConfirm: false,
+    didOpen: () => {
+      const newPwdInput = document.getElementById('swalNewPwd');
+      const confirmPwdInput = document.getElementById('swalConfirmPwd');
+      const warnEl = document.getElementById('swalNewPwdWarn');
+      const matchMsg = document.getElementById('swalConfirmMatchMsg');
+
+      const filterThaiAndNonEnglish = (inputEl) => {
+        const raw = inputEl.value;
+        const cleaned = raw.replace(/[^A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/g, '');
+        if (raw !== cleaned) {
+          inputEl.value = cleaned;
+          if (warnEl) {
+            warnEl.style.display = 'block';
+            clearTimeout(warnEl._timer);
+            warnEl._timer = setTimeout(() => { warnEl.style.display = 'none'; }, 3000);
+          }
+        }
+      };
+
+      const preventThaiKey = (e) => {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
+        const allowed = ['Backspace', 'Tab', 'Enter', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Delete', 'Home', 'End'];
+        if (allowed.includes(e.key)) return;
+        if (e.key.length === 1 && !/^[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]$/.test(e.key)) {
+          e.preventDefault();
+          if (warnEl) {
+            warnEl.style.display = 'block';
+            clearTimeout(warnEl._timer);
+            warnEl._timer = setTimeout(() => { warnEl.style.display = 'none'; }, 3000);
+          }
+        }
+      };
+
+      const updateChecklist = () => {
+        const val = newPwdInput ? newPwdInput.value : '';
+        const hasLen = val.length >= 8;
+        const hasUpper = /[A-Z]/.test(val);
+        const hasLower = /[a-z]/.test(val);
+        const hasNum = /[0-9]/.test(val);
+        const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(val);
+        const hasEnOnly = val.length > 0 && /^[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]+$/.test(val);
+
+        const setReq = (id, ok, labelText) => {
+          const el = document.getElementById(id);
+          if (!el) return;
+          if (ok) {
+            el.style.color = '#059669';
+            el.innerHTML = `<i class="fa-solid fa-circle-check" style="color: #059669;"></i> ${labelText}`;
+          } else {
+            el.style.color = '#64748b';
+            el.innerHTML = `<i class="fa-solid fa-circle-xmark" style="color: #94a3b8;"></i> ${labelText}`;
+          }
+        };
+
+        setReq('swalReqLen', hasLen, '8 ตัวอักษรขึ้นไป');
+        setReq('swalReqUpper', hasUpper, 'พิมพ์ใหญ่ (A-Z)');
+        setReq('swalReqLower', hasLower, 'พิมพ์เล็ก (a-z)');
+        setReq('swalReqNum', hasNum, 'ตัวเลข (0-9)');
+        setReq('swalReqSpecial', hasSpecial, 'อักขระพิเศษ (!@#$%^&*()_+-= เป็นต้น)');
+        setReq('swalReqEnOnly', hasEnOnly, 'ภาษาอังกฤษเท่านั้น (ห้ามมีภาษาไทย)');
+
+        // Check match
+        if (confirmPwdInput && confirmPwdInput.value) {
+          matchMsg.style.display = 'block';
+          if (confirmPwdInput.value === val) {
+            matchMsg.style.color = '#059669';
+            matchMsg.innerHTML = '<i class="fa-solid fa-circle-check"></i> รหัสผ่านตรงกันเรียบร้อย';
+          } else {
+            matchMsg.style.color = '#dc2626';
+            matchMsg.innerHTML = '<i class="fa-solid fa-circle-xmark"></i> รหัสผ่านไม่ตรงกัน';
+          }
+        } else if (matchMsg) {
+          matchMsg.style.display = 'none';
+        }
+      };
+
+      if (newPwdInput) {
+        newPwdInput.addEventListener('keydown', preventThaiKey);
+        newPwdInput.addEventListener('input', () => {
+          filterThaiAndNonEnglish(newPwdInput);
+          updateChecklist();
+        });
+      }
+
+      if (confirmPwdInput) {
+        confirmPwdInput.addEventListener('keydown', preventThaiKey);
+        confirmPwdInput.addEventListener('input', () => {
+          filterThaiAndNonEnglish(confirmPwdInput);
+          updateChecklist();
+        });
+      }
+    },
+    preConfirm: () => {
+      const newPwd = document.getElementById('swalNewPwd')?.value.trim() || '';
+      const confirmPwd = document.getElementById('swalConfirmPwd')?.value.trim() || '';
+
+      const hasLen = newPwd.length >= 8;
+      const hasUpper = /[A-Z]/.test(newPwd);
+      const hasLower = /[a-z]/.test(newPwd);
+      const hasNum = /[0-9]/.test(newPwd);
+      const hasSpecial = /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(newPwd);
+      const hasEnOnly = /^[A-Za-z0-9!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]+$/.test(newPwd);
+
+      if (!hasLen || !hasUpper || !hasLower || !hasNum || !hasSpecial || !hasEnOnly) {
+        Swal.showValidationMessage('รหัสผ่านต้องเป็นภาษาอังกฤษเท่านั้น 8 ตัวขึ้นไป และต้องประกอบด้วย พิมพ์ใหญ่ พิมพ์เล็ก ตัวเลข และอักขระพิเศษ');
+        return false;
+      }
+
+      if (newPwd !== confirmPwd) {
+        Swal.showValidationMessage('รหัสผ่านใหม่ และ ยืนยันรหัสผ่านใหม่อีกครั้ง ไม่ตรงกัน');
+        return false;
+      }
+
+      return newPwd;
+    }
+  }).then((result) => {
+    if (result.isConfirmed && result.value) {
+      const newPassword = result.value;
+
+      // Update currentUser session
+      currentUser.password = newPassword;
+      sessionStorage.setItem('eredt_session', JSON.stringify(currentUser));
+
+      // Update in localStorage users
+      let users = getUsers();
+      const idx = users.findIndex(u => u.username && u.username.toLowerCase() === currentUser.username.toLowerCase());
+      if (idx !== -1) {
+        users[idx].password = newPassword;
+      } else {
+        users.push({ ...currentUser, password: newPassword });
+      }
+      saveUsers(users);
+
+      Swal.fire({
+        icon: 'success',
+        title: 'เปลี่ยนรหัสผ่านสำเร็จ',
+        text: 'รหัสผ่านของคุณได้รับการอัปเดตเรียบร้อยแล้ว',
+        timer: 2000,
+        showConfirmButton: false
+      });
+    }
+  });
+}
+window.openChangePasswordModal = openChangePasswordModal;
+

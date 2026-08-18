@@ -38,13 +38,33 @@
     </div>
     
     <div class="user-nav">
-      <div class="user-info">
-        <div id="userAvatar" class="user-avatar">P</div>
-        <div class="user-details">
-          <span id="userName" class="user-name">พนักงานสอบสวน</span>
-          <span id="userRoleBadge" class="user-role-badge">พนักงานสอบสวน</span>
+      <div class="user-menu-wrapper" style="position: relative;">
+        <div id="userProfileTrigger" class="user-info" onclick="toggleUserDropdown(event)" style="cursor: pointer; user-select: none;" title="คลิกเพื่อจัดการบัญชีผู้ใช้">
+          <div id="userAvatar" class="user-avatar">P</div>
+          <div class="user-details">
+            <span id="userName" class="user-name">พนักงานสอบสวน</span>
+            <span id="userRoleBadge" class="user-role-badge">พนักงานสอบสวน</span>
+          </div>
+          <i class="fa-solid fa-chevron-down user-dropdown-caret"></i>
+        </div>
+
+        <!-- User Dropdown Menu -->
+        <div id="userDropdownMenu" class="user-dropdown-menu" style="display: none;">
+          <div class="user-dropdown-header">
+            <div id="userDropdownName" class="user-dropdown-name">พนักงานสอบสวน</div>
+            <div id="userDropdownUsername" class="user-dropdown-sub">@police</div>
+          </div>
+          <a href="javascript:void(0)" onclick="openChangePasswordModal(event)" class="user-dropdown-item">
+            <i class="fa-solid fa-key" style="color: #eab308;"></i>
+            <span>เปลี่ยนรหัสผ่าน</span>
+          </a>
+          <a href="javascript:void(0)" onclick="handleLogout()" class="user-dropdown-item text-danger">
+            <i class="fa-solid fa-right-from-bracket" style="color: #ef4444;"></i>
+            <span>ออกจากระบบ</span>
+          </a>
         </div>
       </div>
+
       <button onclick="handleLogout()" class="btn-logout">
         <i class="fa-solid fa-right-from-bracket"></i> <span class="btn-logout-text">ออกจากระบบ</span>
       </button>
@@ -407,6 +427,85 @@
           <button type="button" onclick="closeModal('returnToPoolModal')" class="btn-secondary">ยกเลิก</button>
           <button type="submit" class="btn-primary" style="width: auto; background: #d97706; border-color: #d97706;">
             <i class="fa-solid fa-rotate-left"></i> ยืนยันคืนสำนวน
+          </button>
+        </div>
+      </form>
+    </div>
+  <!-- MODAL: CHANGE PASSWORD (เปลี่ยนรหัสผ่าน) -->
+  <div id="changePasswordModal" class="modal-overlay">
+    <div class="glass-panel modal-container" style="max-width: 480px; width: 92%;">
+      <div class="modal-header">
+        <h3 style="font-size: 1.15rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; color: #ffffff;">
+          <i class="fa-solid fa-key" style="color: #eab308;"></i> เปลี่ยนรหัสผ่านผู้ใช้งาน
+        </h3>
+        <button onclick="closeModal('changePasswordModal')" class="modal-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <form id="changePasswordForm" onsubmit="handleChangePassword(event)">
+        <!-- 1. รหัสผ่านเดิม (Disabled) -->
+        <div class="form-group" style="margin-bottom: 1.1rem;">
+          <label for="currentPasswordDisplay" style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.35rem; display: flex; justify-content: space-between; align-items: center;">
+            <span><i class="fa-solid fa-lock" style="color: #94a3b8;"></i> รหัสผ่านเดิม (Current Password)</span>
+            <span style="font-size: 0.725rem; font-weight: normal; color: #cbd5e1; background: rgba(148,163,184,0.25); padding: 0.1rem 0.4rem; border-radius: 4px;">รหัสเดิมที่ใช้งานอยู่</span>
+          </label>
+          <div style="position: relative; display: flex; align-items: center;">
+            <input type="password" id="currentPasswordDisplay" class="form-control" style="background: rgba(15, 23, 42, 0.6); color: #cbd5e1; cursor: not-allowed; padding-right: 42px; border-color: rgba(255,255,255,0.15);" disabled readonly>
+            <button type="button" onclick="togglePasswordVisibility('currentPasswordDisplay', this)" class="btn-toggle-pwd" title="ดู/ซ่อนรหัสผ่าน" tabindex="-1">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- 2. รหัสผ่านใหม่ -->
+        <div class="form-group" style="margin-bottom: 0.75rem;">
+          <label for="newPasswordInput" style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.35rem; display: block;">
+            <i class="fa-solid fa-shield-halved" style="color: #38bdf8;"></i> รหัสผ่านใหม่ (New Password) <span style="color: #ef4444;">*</span>
+          </label>
+          <div style="position: relative; display: flex; align-items: center;">
+            <input type="password" id="newPasswordInput" class="form-control" placeholder="ป้อนรหัสผ่านใหม่ (ภาษาอังกฤษเท่านั้น)" required autocomplete="new-password" style="padding-right: 42px;" oninput="handlePasswordInputCheck(this)" onkeydown="preventNonEnglishPasswordKey(event, this)">
+            <button type="button" onclick="togglePasswordVisibility('newPasswordInput', this)" class="btn-toggle-pwd" title="ดู/ซ่อนรหัสผ่าน" tabindex="-1">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+          <div id="newPasswordInputWarn" style="display: none; color: #ef4444; font-size: 0.75rem; margin-top: 0.25rem;">
+            <i class="fa-solid fa-triangle-exclamation"></i> อนุญาตให้พิมพ์เฉพาะตัวอักษรภาษาอังกฤษ ตัวเลข และอักขระพิเศษเท่านั้น (ไม่อนุญาตให้ใช้ภาษาไทย)
+          </div>
+        </div>
+
+        <!-- 3. เงื่อนไขรหัสผ่าน (Interactive Checklist) -->
+        <div class="password-req-box" style="background: rgba(15, 23, 42, 0.45); border: 1px solid rgba(255,255,255,0.1); border-radius: 8px; padding: 0.75rem 0.85rem; margin-bottom: 1.1rem; font-size: 0.775rem;">
+          <div style="font-weight: 600; color: #cbd5e1; margin-bottom: 0.4rem; display: flex; align-items: center; gap: 0.35rem;">
+            <i class="fa-solid fa-circle-info" style="color: #38bdf8;"></i> เงื่อนไขความปลอดภัยของรหัสผ่าน:
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.3rem 0.6rem;">
+            <div id="pwdReqLen" class="pwd-req-item"><i class="fa-solid fa-circle-xmark"></i> 8 ตัวอักษรขึ้นไป</div>
+            <div id="pwdReqUpper" class="pwd-req-item"><i class="fa-solid fa-circle-xmark"></i> พิมพ์ใหญ่ (A-Z)</div>
+            <div id="pwdReqLower" class="pwd-req-item"><i class="fa-solid fa-circle-xmark"></i> พิมพ์เล็ก (a-z)</div>
+            <div id="pwdReqNum" class="pwd-req-item"><i class="fa-solid fa-circle-xmark"></i> ตัวเลข (0-9)</div>
+            <div id="pwdReqSpecial" class="pwd-req-item" style="grid-column: span 2;"><i class="fa-solid fa-circle-xmark"></i> อักขระพิเศษ (!@#$%^&*()_+-= เป็นต้น)</div>
+            <div id="pwdReqEnOnly" class="pwd-req-item" style="grid-column: span 2;"><i class="fa-solid fa-circle-xmark"></i> ภาษาอังกฤษเท่านั้น (ห้ามมีภาษาไทย)</div>
+          </div>
+        </div>
+
+        <!-- 4. ยืนยันรหัสผ่านใหม่อีกครั้ง -->
+        <div class="form-group" style="margin-bottom: 1.25rem;">
+          <label for="confirmNewPasswordInput" style="font-size: 0.875rem; font-weight: 600; margin-bottom: 0.35rem; display: block;">
+            <i class="fa-solid fa-check-double" style="color: #34d399;"></i> ยืนยันรหัสผ่านใหม่อีกครั้ง (Confirm Password) <span style="color: #ef4444;">*</span>
+          </label>
+          <div style="position: relative; display: flex; align-items: center;">
+            <input type="password" id="confirmNewPasswordInput" class="form-control" placeholder="ป้อนรหัสผ่านใหม่อีกครั้ง" required autocomplete="new-password" style="padding-right: 42px;" oninput="handleConfirmPasswordInputCheck(this)" onkeydown="preventNonEnglishPasswordKey(event, this)">
+            <button type="button" onclick="togglePasswordVisibility('confirmNewPasswordInput', this)" class="btn-toggle-pwd" title="ดู/ซ่อนรหัสผ่าน" tabindex="-1">
+              <i class="fa-solid fa-eye"></i>
+            </button>
+          </div>
+          <div id="confirmPasswordMatchMsg" style="display: none; font-size: 0.75rem; margin-top: 0.25rem;"></div>
+        </div>
+
+        <!-- 5. Actions -->
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; padding-top: 0.5rem; border-top: 1px solid rgba(255,255,255,0.1);">
+          <button type="button" onclick="closeModal('changePasswordModal')" class="btn-secondary">ยกเลิก</button>
+          <button type="submit" id="btnSubmitChangePassword" class="btn-primary" style="width: auto;">
+            <i class="fa-solid fa-floppy-disk"></i> ยืนยันเปลี่ยนรหัสผ่าน
           </button>
         </div>
       </form>
