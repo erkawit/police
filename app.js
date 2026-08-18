@@ -1144,6 +1144,8 @@ async function handleLogin(event) {
     });
 
     renderAppLayout();
+    // Fetch and check latest live data from Google Sheet upon login
+    fetchLiveGoogleSheetData({ isSilent: true });
   } else {
     Swal.fire({
       icon: 'error',
@@ -1422,13 +1424,37 @@ function switchView(viewName, event, subTab) {
 
 function isMyPoliceCase(c, user) {
   if (!user || user.role !== 'police') return true;
-  const isStationMatch = (!c.station || !user.station || c.station === user.station);
-  const isOfficerMatch = (
-    c.officer === user.username ||
-    c.officer === user.name ||
-    (user.name && c.officer && (c.officer.includes(user.name) || user.name.includes(c.officer)))
+
+  // 1. Station Matching (ตรวจเช็คสังกัด สภ.)
+  const caseStation = String(c.station || '').trim().toLowerCase();
+  const userStation = String(user.station || '').trim().toLowerCase();
+  let isStationMatch = true;
+  if (userStation && caseStation) {
+    isStationMatch = (
+      caseStation === userStation ||
+      caseStation.replace(/\s+/g, '') === userStation.replace(/\s+/g, '') ||
+      caseStation.includes(userStation) ||
+      userStation.includes(caseStation)
+    );
+  }
+
+  // 2. Officer Matching (ตรวจเช็คชื่อ/Username พนักงานสอบสวนเจ้าของคดี)
+  const caseOfficer = String(c.officer || '').trim().toLowerCase();
+  const userUsername = String(user.username || '').trim().toLowerCase();
+  const userName = String(user.name || '').trim().toLowerCase();
+
+  if (!caseOfficer) return false;
+
+  const isOfficerMatch = Boolean(
+    (userUsername && caseOfficer === userUsername) ||
+    (userName && caseOfficer === userName) ||
+    (userUsername && caseOfficer.replace(/\s+/g, '') === userUsername.replace(/\s+/g, '')) ||
+    (userName && caseOfficer.replace(/\s+/g, '') === userName.replace(/\s+/g, '')) ||
+    (userName && (caseOfficer.includes(userName) || userName.includes(caseOfficer))) ||
+    (userUsername && (caseOfficer.includes(userUsername) || userUsername.includes(caseOfficer)))
   );
-  return isStationMatch && Boolean(isOfficerMatch);
+
+  return isStationMatch && isOfficerMatch;
 }
 
 function renderDashboard() {
@@ -3769,6 +3795,15 @@ function parseUsersCSV(csvText) {
   }
 
   return users;
+}
+
+function parseJSON(str) {
+  if (!str) return null;
+  try {
+    return typeof str === 'string' ? JSON.parse(str) : str;
+  } catch (e) {
+    return null;
+  }
 }
 
 function parseRequestsCSV(csvText) {
