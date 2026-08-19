@@ -2120,12 +2120,12 @@ function renderPoliceView() {
         <td>ครั้งที่ ${c.k}</td>
         <td><b style="color: #b45309;">${formatThaiDate(c.filingDeadline)} (16.00 น.)</b></td>
         <td>${formatThaiDate(c.legalDeadline)}</td>
-        <td>
-          <div style="display: flex; gap: 0.35rem; align-items: center;">
-            <button onclick="claimForMe('${c.caseNumber}', event)" type="button" class="btn-primary" style="padding: 0.3rem 0.75rem; font-size: 0.8rem; width: auto;">
+        <td style="white-space: nowrap; width: 1%;">
+          <div class="table-actions-cell">
+            <button onclick="claimForMe('${c.caseNumber}', event)" type="button" class="btn-police-upload-inline" style="background-color: #1e3a8a !important; border-color: #1d4ed8 !important;">
               <i class="fa-solid fa-hand-holding-hand"></i> รับเป็นเจ้าของคดี
             </button>
-            <button onclick="openReturnModal('${c.caseNumber}')" type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.8rem; width: auto; background-color: #d97706; border-color: #d97706; color: #fff;" title="คืนสำนวนกลับกองกลางศาล">
+            <button onclick="openReturnModal('${c.caseNumber}')" type="button" class="btn-police-return-inline" title="คืนสำนวนกลับกองกลางศาล">
               <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
             </button>
           </div>
@@ -2185,21 +2185,21 @@ function renderPoliceTable() {
         if (c.fileName) {
           // File HAS been uploaded -> Show Preview PDF + re-upload & return
           actionButtons += `
-            <button onclick="previewPdfFile('${c.caseNumber}', event)" type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #0284c7; border-color: #0284c7; color: #fff; margin-right: 0.3rem;" title="ดูตัวอย่างไฟล์ PDF">
-              <i class="fa-solid fa-file-pdf"></i> Preview PDF
+            <button onclick="previewPdfFile('${c.caseNumber}', event)" type="button" class="btn-police-preview-inline" title="ดูตัวอย่างไฟล์ PDF">
+              <i class="fa-solid fa-file-pdf"></i> ดู PDF
             </button>
           `;
 
           const canReupload = !isClosedTime && !c.closed;
           actionButtons += `
-            <button ${canReupload ? `onclick="openUploadModal('${c.caseNumber}')"` : 'disabled'} type="button" class="btn-primary btn-police-upload" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; ${canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8;'}" title="${isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : 'อัพโหลดไฟล์ใหม่ทับของเดิม'}">
-              <i class="fa-solid fa-upload"></i> อัพโหลดไฟล์ใหม่ทับ
+            <button ${canReupload ? `onclick="openUploadModal('${c.caseNumber}')"` : 'disabled'} type="button" class="btn-police-upload-inline" style="${canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8 !important; border-color: #94a3b8 !important;'}" title="${isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : 'อัพโหลดไฟล์ใหม่ทับของเดิม'}">
+              <i class="fa-solid fa-upload"></i> อัพโหลดทับ
             </button>
           `;
 
           if (!c.history || c.history.length === 0) {
             actionButtons += `
-              <button onclick="openReturnModal('${c.caseNumber}')" type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #d97706; border-color: #d97706; color: #fff; margin-left: 0.3rem;" title="คืนสำนวนกลับกองกลางศาล">
+              <button onclick="openReturnModal('${c.caseNumber}')" type="button" class="btn-police-return-inline" title="คืนสำนวนกลับกองกลางศาล">
                 <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
               </button>
             `;
@@ -2207,16 +2207,16 @@ function renderPoliceTable() {
         } else {
           // File has NOT been uploaded yet -> Show red warning ONLY if time is closed
           if (isClosedTime) {
-            actionButtons += `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 700;"><i class="fa-solid fa-ban"></i> เลย 16.00 น. ยื่นที่ศาลด้วยตนเอง</span>`;
+            actionButtons += `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 700; white-space: nowrap;"><i class="fa-solid fa-ban"></i> เลย 16.00 น. ยื่นที่ศาลด้วยตนเอง</span>`;
           } else {
             actionButtons += `
-              <button onclick="openUploadModal('${c.caseNumber}')" type="button" class="btn-primary btn-police-upload" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto;">
+              <button onclick="openUploadModal('${c.caseNumber}')" type="button" class="btn-police-upload-inline" title="แนบไฟล์คำร้องฝากขัง">
                 <i class="fa-solid fa-upload"></i> อัพโหลด PDF
               </button>
             `;
             if (!c.history || c.history.length === 0) {
               actionButtons += `
-                <button onclick="openReturnModal('${c.caseNumber}')" type="button" class="btn-secondary" style="padding: 0.3rem 0.65rem; font-size: 0.75rem; width: auto; background-color: #d97706; border-color: #d97706; color: #fff; margin-left: 0.3rem;" title="คืนสำนวนกลับกองกลางศาล">
+                <button onclick="openReturnModal('${c.caseNumber}')" type="button" class="btn-police-return-inline" title="คืนสำนวนกลับกองกลางศาล">
                   <i class="fa-solid fa-rotate-left"></i> คืนสำนวน
                 </button>
               `;
@@ -2230,7 +2230,7 @@ function renderPoliceTable() {
           closedTimeInfo = `<div style="font-size: 0.7rem; color: #dc2626; margin-top: 0.25rem; font-weight: 700; white-space: nowrap;"><i class="fa-solid fa-clock"></i> เสร็จสิ้น: ${formatThaiDate(c.closedAt)} ${cDate.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })} น.</div>`;
         }
         actionButtons = `
-          <span class="badge badge-status-closed" style="background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; font-size: 0.75rem; padding: 0.25rem 0.55rem; display: inline-flex; align-items: center; gap: 0.25rem;">
+          <span class="badge badge-status-closed" style="background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; font-size: 0.75rem; padding: 0.25rem 0.55rem; display: inline-flex; align-items: center; gap: 0.25rem; white-space: nowrap;">
             <i class="fa-solid fa-lock"></i> เสร็จสิ้นการฝากขังแล้ว
           </span>
           ${closedTimeInfo}
@@ -2258,18 +2258,18 @@ function renderPoliceTable() {
         `;
       } else if (c.downloaded) {
         downloadStatusCell = `
-          <span class="badge badge-status-downloaded" style="font-size: 0.75rem;">
+          <span class="badge badge-status-downloaded" style="font-size: 0.75rem; white-space: nowrap;">
             <i class="fa-solid fa-circle-check"></i> ดาวน์โหลดแล้ว
           </span>
         `;
       } else if (c.fileName) {
         downloadStatusCell = `
-          <span class="badge badge-status-uploaded" style="font-size: 0.75rem;">
+          <span class="badge badge-status-uploaded" style="font-size: 0.75rem; white-space: nowrap;">
             <i class="fa-solid fa-clock"></i> รอศาลดาวน์โหลด
           </span>
         `;
       } else {
-        downloadStatusCell = `<span style="color: var(--text-muted); font-size: 0.8rem;">ยังไม่อัพโหลด</span>`;
+        downloadStatusCell = `<span style="color: var(--text-muted); font-size: 0.8rem; white-space: nowrap;">ยังไม่อัพโหลด</span>`;
       }
 
       const tr = document.createElement('tr');
@@ -2291,7 +2291,11 @@ function renderPoliceTable() {
           ${flagWarning}
         </td>
         <td data-order="${c.downloadedAt || (c.downloaded ? '1' : '0')}">${downloadStatusCell}</td>
-        <td>${actionButtons}</td>
+        <td style="white-space: nowrap; width: 1%;">
+          <div class="table-actions-cell">
+            ${actionButtons}
+          </div>
+        </td>
       `;
       tbody.appendChild(tr);
     });
@@ -2302,12 +2306,12 @@ function renderPoliceTable() {
     jQuery.fn.dataTable.ext.errMode = 'none';
     const tableEl = $('#policeRequestsDataTable');
     if (tableEl.length) {
-      tableEl.DataTable({
+      const dtInstance = tableEl.DataTable({
         pageLength: 25,
         lengthMenu: [[10, 25, 50, 100, -1], [10, 25, 50, 100, "ทั้งหมด"]],
         order: [], // Preserves newest-to-oldest pre-sorted order
         language: {
-          search: "ค้นหาในตาราง:",
+          search: "ค้นหา:",
           lengthMenu: "แสดง _MENU_ รายการต่อหน้า",
           info: "แสดง _START_ ถึง _END_ จากทั้งหมด _TOTAL_ รายการ",
           infoEmpty: "แสดง 0 ถึง 0 จาก 0 รายการ",
@@ -2321,8 +2325,13 @@ function renderPoliceTable() {
             previous: '<i class="fa-solid fa-angle-left"></i>'
           }
         },
-        dom: '<"top"lf>rt<"bottom"ip><"clear">',
+        dom: '<"top"l>rt<"bottom"ip><"clear">',
         responsive: true
+      });
+
+      // Connect custom search input to DataTable
+      $('#policeSearchInput').off('input').on('input', function() {
+        dtInstance.search(this.value).draw();
       });
     }
   }
@@ -3435,6 +3444,52 @@ function handleConfirmFlagWrongFile(event) {
 // 10. ADMIN CONTROL PANEL & HOLIDAY MANAGER
 // --------------------------------------------------------------------------
 
+function copyToClipboard(text, label = 'ข้อความ') {
+  if (!text) return;
+  
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => {
+      showRealtimeToast(`📋 คัดลอก ${label} เรียบร้อยแล้ว`);
+    }).catch(() => {
+      fallbackCopyText(text, label);
+    });
+  } else {
+    fallbackCopyText(text, label);
+  }
+}
+window.copyToClipboard = copyToClipboard;
+
+function fallbackCopyText(text, label) {
+  try {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    textArea.style.top = '0';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textArea);
+    showRealtimeToast(`📋 คัดลอก ${label} เรียบร้อยแล้ว`);
+  } catch (err) {
+    console.error('Fallback copy failed', err);
+    Swal.fire({
+      icon: 'info',
+      title: `คัดลอก ${label}`,
+      html: `<input type="text" value="${text}" class="form-control" readonly onclick="this.select()">`
+    });
+  }
+}
+
+function copyUserCredentials(username, password, name = '', station = '') {
+  const loginUrl = window.location.origin + window.location.pathname.replace(/\/court\/?|\/police\/?/g, '');
+  const text = `ระบบ e-REDT Online (ศาลจังหวัดอุดรธานี)\n-----------------------------\nชื่อ-นามสกุล: ${name || '-'}\nสังกัด: ${station || '-'}\nUsername: ${username}\nPassword: ${password || '-'}\n-----------------------------\nลิงก์เข้าใช้งาน: ${loginUrl}`;
+  
+  copyToClipboard(text, `ข้อมูลบัญชี ${username}`);
+}
+window.copyUserCredentials = copyUserCredentials;
+
 function renderAdminView() {
   if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'officer')) return;
   const users = getUsers();
@@ -3456,14 +3511,34 @@ function renderAdminView() {
       }
     };
     tr.innerHTML = `
-      <td><b>${u.username}</b></td>
-      <td>${u.name}</td>
+      <td style="white-space: nowrap;">
+        <div style="display: inline-flex; align-items: center; gap: 0.35rem;">
+          <b style="font-family: monospace; font-size: 0.9rem;">${u.username}</b>
+          <button onclick="copyToClipboard('${u.username}', 'Username: ${u.username}')" type="button" class="btn-icon-copy" title="คัดลอก Username: ${u.username}">
+            <i class="fa-regular fa-copy"></i>
+          </button>
+        </div>
+      </td>
+      <td style="white-space: nowrap;">
+        <div style="display: inline-flex; align-items: center; gap: 0.35rem;">
+          <code style="background: #f8fafc; border: 1.5px solid #cbd5e1; padding: 0.2rem 0.45rem; border-radius: 0.35rem; font-family: monospace; font-size: 0.85rem; color: #0f172a; font-weight: 700;">${u.password || '-'}</code>
+          ${u.password ? `
+            <button onclick="copyToClipboard('${u.password}', 'Password: ${u.password}')" type="button" class="btn-icon-copy" title="คัดลอก Password">
+              <i class="fa-regular fa-copy"></i>
+            </button>
+          ` : ''}
+        </div>
+      </td>
+      <td>${u.name || '-'}</td>
       <td>${roleBadges[u.role] || u.role}</td>
       <td>${u.station || '-'}</td>
       <td><span class="badge badge-status-downloaded">อนุมัติแล้ว</span></td>
-      <td>
+      <td style="white-space: nowrap;">
+        <button onclick="copyUserCredentials('${u.username}', '${(u.password || '').replace(/'/g, "\\'")}', '${(u.name || '').replace(/'/g, "\\'")}', '${(u.station || '').replace(/'/g, "\\'")}')" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background-color: #0284c7; border-color: #0284c7; color: #ffffff !important;" title="คัดลอกข้อมูลบัญชี (Username + Password) ส่งให้ผู้ใช้">
+          <i class="fa-regular fa-copy"></i> คัดลอก
+        </button>
         <button onclick="editUser('${u.username}')" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem;"><i class="fa-solid fa-pen-to-square"></i> แก้ไข</button>
-        <button onclick="deleteUser('${u.username}')" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background-color: #dc2626; color: #fff;"><i class="fa-solid fa-trash"></i> ลบ</button>
+        ${u.username !== 'admin' ? `<button onclick="deleteUser('${u.username}')" class="btn-secondary" style="padding: 0.25rem 0.5rem; font-size: 0.75rem; background-color: #dc2626; color: #fff;"><i class="fa-solid fa-trash"></i> ลบ</button>` : ''}
       </td>
     `;
     tbody.appendChild(tr);
@@ -4633,13 +4708,24 @@ function openMobileUserActionModal(username) {
   Swal.fire({
     title: `ผู้ใช้งาน: ${u.username}`,
     html: `
-      <div style="text-align: left; font-size: 0.875rem; color: #334155; line-height: 1.6; background: #f8fafc; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1rem;">
-        <div><b>ชื่อ-สกุล:</b> ${u.name || '-'}</div>
-        <div><b>บทบาท:</b> ${roleNames[u.role] || u.role}</div>
-        <div><b>สถานีตำรวจ:</b> ${u.station || '-'}</div>
-        <div><b>สถานะ:</b> อนุมัติแล้ว</div>
+      <div style="text-align: left; font-size: 0.875rem; color: #334155; line-height: 1.6; background: #f8fafc; padding: 1rem; border-radius: 0.75rem; margin-bottom: 1rem; border: 1px solid #e2e8f0;">
+        <div style="margin-bottom: 0.35rem;"><b>ชื่อ-สกุล:</b> ${u.name || '-'}</div>
+        <div style="margin-bottom: 0.35rem;"><b>บทบาท:</b> ${roleNames[u.role] || u.role}</div>
+        <div style="margin-bottom: 0.35rem;"><b>สถานีตำรวจ:</b> ${u.station || '-'}</div>
+        <div style="margin-bottom: 0.35rem; display: flex; align-items: center; justify-content: space-between;">
+          <span><b>Username:</b> <code style="font-family: monospace; font-weight: 700; font-size: 0.9rem;">${u.username}</code></span>
+          <button onclick="copyToClipboard('${u.username}', 'Username')" class="btn-icon-copy" title="คัดลอก Username"><i class="fa-regular fa-copy"></i> คัดลอก</button>
+        </div>
+        <div style="margin-bottom: 0.35rem; display: flex; align-items: center; justify-content: space-between;">
+          <span><b>Password:</b> <code style="background: #e2e8f0; padding: 0.15rem 0.4rem; border-radius: 0.25rem; font-family: monospace; font-weight: 700; font-size: 0.9rem;">${u.password || '-'}</code></span>
+          ${u.password ? `<button onclick="copyToClipboard('${u.password}', 'Password')" class="btn-icon-copy" title="คัดลอก Password"><i class="fa-regular fa-copy"></i> คัดลอก</button>` : ''}
+        </div>
+        <div><b>สถานะ:</b> <span class="badge badge-status-downloaded">อนุมัติแล้ว</span></div>
       </div>
       <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+        <button onclick="Swal.close(); copyUserCredentials('${u.username}', '${(u.password || '').replace(/'/g, "\\'")}', '${(u.name || '').replace(/'/g, "\\'")}', '${(u.station || '').replace(/'/g, "\\'")}')" class="btn-primary" style="width: 100%; background-color: #0284c7; border-color: #0284c7;">
+          <i class="fa-regular fa-copy"></i> คัดลอกข้อมูลบัญชีส่งให้ผู้ใช้
+        </button>
         <button onclick="Swal.close(); editUser('${u.username}');" class="btn-secondary" style="width: 100%;">
           <i class="fa-solid fa-pen-to-square"></i> แก้ไขข้อมูลผู้ใช้
         </button>
