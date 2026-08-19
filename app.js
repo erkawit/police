@@ -1587,23 +1587,23 @@ function switchView(viewName, event, subTab) {
 // 7. DASHBOARD & CALENDAR ENGINE
 // --------------------------------------------------------------------------
 
+function isSameStation(station1, station2) {
+  if (!station1 || !station2) return false;
+  const s1 = String(station1).trim().toLowerCase().replace(/\s+/g, '').replace(/^สภ\./, '').replace(/^สภ/, '');
+  const s2 = String(station2).trim().toLowerCase().replace(/\s+/g, '').replace(/^สภ\./, '').replace(/^สภ/, '');
+  if (!s1 || !s2) return false;
+  return s1 === s2 || s1.includes(s2) || s2.includes(s1);
+}
+window.isSameStation = isSameStation;
+
 function isMyPoliceCase(c, user) {
   if (!user || user.role !== 'police') return true;
 
-  // 1. Station Matching (ตรวจเช็คสังกัด สภ.)
-  const caseStation = String(c.station || '').trim().toLowerCase();
-  const userStation = String(user.station || '').trim().toLowerCase();
-  let isStationMatch = true;
-  if (userStation && caseStation) {
-    isStationMatch = (
-      caseStation === userStation ||
-      caseStation.replace(/\s+/g, '') === userStation.replace(/\s+/g, '') ||
-      caseStation.includes(userStation) ||
-      userStation.includes(caseStation)
-    );
-  }
+  // 1. Station Matching: ตรวจสอบสถานีตำรวจสังกัด (ต้องตรงกับสถานีของตนเองเท่านั้น ห้ามแสดงผลสถานีอื่นเด็ดขาด)
+  if (!user.station || !c.station) return false;
+  if (!isSameStation(c.station, user.station)) return false;
 
-  // 2. Officer Matching (ตรวจเช็คชื่อ/Username พนักงานสอบสวนเจ้าของคดี)
+  // 2. Officer Matching: ตรวจสอบเจ้าของสำนวนคดี
   const caseOfficer = String(c.officer || '').trim().toLowerCase();
   const userUsername = String(user.username || '').trim().toLowerCase();
   const userName = String(user.name || '').trim().toLowerCase();
@@ -1619,7 +1619,7 @@ function isMyPoliceCase(c, user) {
     (userUsername && (caseOfficer.includes(userUsername) || userUsername.includes(caseOfficer)))
   );
 
-  return isStationMatch && isOfficerMatch;
+  return isOfficerMatch;
 }
 
 function renderDashboard() {
@@ -2099,8 +2099,12 @@ function renderPoliceView() {
   const holidays = getHolidays();
   const enriched = rawRequests.map(r => enrichCase(r, holidays));
 
-  // 1. Station Inbox: Unassigned cases for police's station
-  const stationInbox = enriched.filter(c => c.station === currentUser.station && !c.officer && !c.closed);
+  // 1. Station Inbox: Unassigned cases strictly for police's station only (ห้ามแสดงผลสถานีอื่นเด็ดขาด)
+  const stationInbox = enriched.filter(c => 
+    isSameStation(c.station, currentUser.station) && 
+    !c.officer && 
+    !c.closed
+  );
   setElementText('stationInboxCount', `${stationInbox.length} คดีรอรับ`);
   setElementText('policeInboxBadgeCount', `${stationInbox.length}`);
 
@@ -2108,7 +2112,7 @@ function renderPoliceView() {
   inboxTbody.innerHTML = '';
 
   if (stationInbox.length === 0) {
-    inboxTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">ไม่มีคดีใหม่รอรับเป็นเจ้าของในกล่องจดหมายสถานี</td></tr>`;
+    inboxTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 1.5rem;">ไม่มีคดีใหม่รอรับเป็นเจ้าของในกล่องจดหมายสถานี (${currentUser.station || 'สังกัดของท่าน'})</td></tr>`;
   } else {
     stationInbox.forEach(c => {
       const typeBadge = c.type === 'ยฝ.' ? '<span class="badge badge-type-yf">ยฝ.</span>' : '<span class="badge badge-type-f">ฝ.</span>';
@@ -4955,6 +4959,195 @@ function toggleSwalPwd(inputId, btnEl) {
   }
 }
 window.toggleSwalPwd = toggleSwalPwd;
+
+function openEditProfileModal(event) {
+  if (event) {
+    try { event.preventDefault(); } catch (e) {}
+    try { event.stopPropagation(); } catch (e) {}
+  }
+  if (typeof closeUserDropdown === 'function') closeUserDropdown();
+
+  if (!currentUser) {
+    Swal.fire({
+      icon: 'error',
+      title: 'ไม่พบบัญชีผู้ใช้',
+      text: 'กรุณาเข้าสู่ระบบก่อนแก้ไขข้อมูลส่วนตัว'
+    });
+    return;
+  }
+
+  // Check 3-month restriction (90 days)
+  const THREE_MONTHS_DAYS = 90;
+  const THREE_MONTHS_MS = THREE_MONTHS_DAYS * 24 * 60 * 60 * 1000;
+  const now = new Date();
+  
+  if (currentUser.lastNameChangeAt) {
+    const lastChangeDate = new Date(currentUser.lastNameChangeAt);
+    const timeDiff = now.getTime() - lastChangeDate.getTime();
+    
+    if (timeDiff < THREE_MONTHS_MS) {
+      const nextAllowedDate = new Date(lastChangeDate.getTime() + THREE_MONTHS_MS);
+      const remainingDays = Math.ceil((nextAllowedDate.getTime() - now.getTime()) / (24 * 60 * 60 * 1000));
+      
+      Swal.fire({
+        icon: 'warning',
+        title: '⚠️ ไม่สามารถแก้ไขข้อมูลได้ในขณะนี้',
+        html: `
+          <div style="text-align: left; font-size: 0.9rem; color: #334155; line-height: 1.6; background: #fffbeb; border: 1.5px solid #fcd34d; padding: 1rem; border-radius: 0.5rem; margin-bottom: 0.75rem;">
+            <div style="font-weight: 700; color: #b45309; margin-bottom: 0.35rem;">
+              <i class="fa-solid fa-triangle-exclamation"></i> เงื่อนไขความปลอดภัย:
+            </div>
+            <div>ท่านได้ทำการแก้ไขชื่อ-นามสกุลล่าสุดไปเมื่อวันที่ <b>${formatThaiDate(currentUser.lastNameChangeAt)}</b></div>
+            <div style="margin-top: 0.25rem; color: #dc2626; font-weight: 600;">
+              ระบบอนุญาตให้แก้ไขข้อมูลส่วนตัวได้เพียง <b>3 เดือนต่อครั้ง</b> เท่านั้น
+            </div>
+          </div>
+          <div style="text-align: left; font-size: 0.875rem; color: #475569;">
+            ท่านจะสามารถแก้ไขข้อมูลได้อีกครั้งในวันที่ <b>${formatThaiDate(nextAllowedDate.toISOString())}</b> (อีกประมาณ <b>${remainingDays}</b> วัน)
+          </div>
+        `,
+        confirmButtonColor: '#1e3a8a',
+        confirmButtonText: 'รับทราบ'
+      });
+      return;
+    }
+  }
+
+  const currentFullName = currentUser.name || '';
+  const lastChangeInfo = currentUser.lastNameChangeAt 
+    ? `แก้ไขล่าสุดเมื่อ: ${formatThaiDate(currentUser.lastNameChangeAt)}` 
+    : 'ยังไม่เคยมีการแก้ไขข้อมูล';
+
+  const htmlContent = `
+    <div style="text-align: left; font-family: 'Prompt', 'Sarabun', sans-serif;">
+      <!-- กล่องคำอธิบายและเงื่อนไขการแก้ไข -->
+      <div style="background: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 8px; padding: 0.85rem 1rem; margin-bottom: 1.15rem; font-size: 0.825rem; color: #1e3a8a; line-height: 1.5;">
+        <div style="font-weight: 700; display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.35rem; color: #1d4ed8;">
+          <i class="fa-solid fa-circle-info"></i> คำแนะนำและข้อกำหนดการแก้ไขข้อมูลส่วนตัว:
+        </div>
+        <div>
+          กรุณาตรวจสอบข้อมูลให้ถูกต้องก่อนยืนยัน <b>เพราะระบบอนุญาตให้เปลี่ยนแปลงข้อมูลส่วนตัวได้เพียง 3 เดือนต่อครั้งเท่านั้น</b>
+        </div>
+        <div style="margin-top: 0.35rem; font-size: 0.775rem; color: #64748b;">
+          <i class="fa-solid fa-clock-rotate-left"></i> สถานะ: ${lastChangeInfo}
+        </div>
+      </div>
+
+      <!-- 1. บัญชีผู้ใช้งาน (Disabled) -->
+      <div style="margin-bottom: 0.85rem;">
+        <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #334155; margin-bottom: 0.35rem;">
+          <i class="fa-solid fa-user" style="color: #64748b;"></i> ชื่อผู้ใช้งาน (Username)
+        </label>
+        <input type="text" value="${currentUser.username || ''}" disabled readonly style="width: 100%; padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; background: #f1f5f9; color: #64748b; cursor: not-allowed; font-size: 0.9rem; box-sizing: border-box; font-family: monospace; font-weight: 700;">
+      </div>
+
+      <!-- 2. ชื่อ-นามสกุล เดิม -->
+      <div style="margin-bottom: 0.85rem;">
+        <label style="display: block; font-size: 0.85rem; font-weight: 600; color: #334155; margin-bottom: 0.35rem;">
+          <i class="fa-solid fa-id-card" style="color: #64748b;"></i> ชื่อ-นามสกุล เดิม (ที่แสดงผลอยู่ในระบบ)
+        </label>
+        <input type="text" value="${currentFullName.replace(/"/g, '&quot;')}" disabled readonly style="width: 100%; padding: 0.55rem 0.75rem; border: 1px solid #cbd5e1; border-radius: 8px; background: #f1f5f9; color: #64748b; cursor: not-allowed; font-size: 0.9rem; box-sizing: border-box;">
+      </div>
+
+      <!-- 3. ชื่อ-นามสกุล ใหม่ -->
+      <div style="margin-bottom: 0.5rem;">
+        <label for="swalNewFullName" style="display: block; font-size: 0.85rem; font-weight: 600; color: #334155; margin-bottom: 0.35rem;">
+          <i class="fa-solid fa-user-pen" style="color: #0284c7;"></i> ชื่อ - นามสกุล ใหม่ <span style="color: #dc2626;">*</span>
+        </label>
+        <input type="text" id="swalNewFullName" placeholder="เช่น ร.ต.อ. สมศักดิ์ สุขใจ หรือ นายสมศักดิ์ สุขใจ" style="width: 100%; padding: 0.55rem 0.75rem; border: 1.5px solid #cbd5e1; border-radius: 8px; font-size: 0.925rem; box-sizing: border-box; outline: none; transition: border-color 0.2s;" onfocus="this.style.borderColor='#0284c7';" onblur="this.style.borderColor='#cbd5e1';">
+      </div>
+      <div id="swalNameErrorMsg" style="color: #dc2626; font-size: 0.775rem; display: none; margin-top: 0.25rem;"></div>
+    </div>
+  `;
+
+  Swal.fire({
+    title: '<i class="fa-solid fa-user-pen" style="color: #0284c7;"></i> แก้ไขข้อมูลส่วนตัว',
+    html: htmlContent,
+    showCancelButton: true,
+    confirmButtonText: '<i class="fa-solid fa-floppy-disk"></i> ยืนยันบันทึกข้อมูล',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#0284c7',
+    cancelButtonColor: '#64748b',
+    focusConfirm: false,
+    width: '460px',
+    preConfirm: () => {
+      const newName = (document.getElementById('swalNewFullName')?.value || '').trim();
+      const errEl = document.getElementById('swalNameErrorMsg');
+      
+      if (!newName) {
+        if (errEl) {
+          errEl.textContent = 'กรุณากรอกชื่อ - นามสกุล ใหม่';
+          errEl.style.display = 'block';
+        }
+        Swal.showValidationMessage('กรุณากรอกชื่อ - นามสกุล ใหม่');
+        return false;
+      }
+
+      if (newName.length < 3) {
+        if (errEl) {
+          errEl.textContent = 'ชื่อ-นามสกุล ต้องมีความยาวอย่างน้อย 3 ตัวอักษร';
+          errEl.style.display = 'block';
+        }
+        Swal.showValidationMessage('ชื่อ-นามสกุล ต้องมีความยาวอย่างน้อย 3 ตัวอักษร');
+        return false;
+      }
+
+      if (newName === currentFullName) {
+        if (errEl) {
+          errEl.textContent = 'ชื่อ-นามสกุล ใหม่ ซ้ำกับชื่อเดิม';
+          errEl.style.display = 'block';
+        }
+        Swal.showValidationMessage('ชื่อ-นามสกุล ใหม่ ซ้ำกับชื่อเดิม');
+        return false;
+      }
+
+      return { newName };
+    }
+  }).then((result) => {
+    if (result.isConfirmed && result.value) {
+      const { newName } = result.value;
+      const changeTimestamp = new Date().toISOString();
+
+      const users = getUsers();
+      const idx = users.findIndex(u => u.username && u.username.toLowerCase() === currentUser.username.toLowerCase());
+      
+      if (idx !== -1) {
+        users[idx].name = newName;
+        users[idx].lastNameChangeAt = changeTimestamp;
+        saveUsers(users);
+      }
+
+      currentUser.name = newName;
+      currentUser.lastNameChangeAt = changeTimestamp;
+      sessionStorage.setItem('eredt_session', JSON.stringify(currentUser));
+
+      // Update UI elements immediately
+      setElementText('userName', newName);
+      setElementText('userDropdownName', newName);
+
+      Swal.fire({
+        icon: 'success',
+        title: 'แก้ไขข้อมูลส่วนตัวสำเร็จ',
+        html: `
+          <div style="font-size: 0.95rem; color: #1e293b; margin-bottom: 0.5rem;">
+            เปลี่ยนชื่อ-นามสกุลเป็น <b>${newName}</b> เรียบร้อยแล้ว
+          </div>
+          <div style="font-size: 0.8rem; color: #64748b;">
+            <i class="fa-solid fa-calendar-check"></i> บันทึกข้อมูลเมื่อ: ${formatThaiDate(changeTimestamp)}
+          </div>
+          <div style="font-size: 0.775rem; color: #b45309; margin-top: 0.5rem; background: #fffbeb; padding: 0.4rem; border-radius: 4px;">
+            <i class="fa-solid fa-lock"></i> ท่านจะสามารถแก้ไขข้อมูลได้อีกครั้งในอีก 3 เดือน (วันที่ ${formatThaiDate(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())})
+          </div>
+        `,
+        timer: 3500,
+        showConfirmButton: true,
+        confirmButtonColor: '#0284c7',
+        confirmButtonText: 'ตกลง'
+      });
+    }
+  });
+}
+window.openEditProfileModal = openEditProfileModal;
 
 function openChangePasswordModal(event) {
   if (event) {
