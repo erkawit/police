@@ -23,7 +23,7 @@
   <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
   <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
   <!-- System Stylesheet -->
-  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles.css?v=2.8.0">
 </head>
 <body class="theme-police">
 
@@ -337,7 +337,7 @@
   </div>
 
   <!-- LOGIN VIEW CONTAINER -->
-  <div id="loginView" class="login-wrapper animate-fade-in">
+  <div id="loginView" class="login-wrapper animate-fade-in" style="display: flex;">
     <div class="login-card">
       <div class="login-header">
         <img src="img/logo.png" alt="e-REDT Logo">
@@ -431,6 +431,36 @@
         </div>
       </form>
     </div>
+  </div>
+
+  <!-- MODAL: RETURN CASE FILE (Court Return File to Police for Revision) -->
+  <div id="flagWrongFileModal" class="modal-overlay">
+    <div class="glass-panel modal-container" style="max-width: 480px;">
+      <div class="modal-header">
+        <h3 style="font-size: 1.15rem; font-weight: 700; color: #d97706;"><i class="fa-solid fa-rotate-left"></i> ส่งคืนคำร้องให้พนักงานสอบสวนแก้ไข</h3>
+        <button onclick="closeModal('flagWrongFileModal')" class="modal-close"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <form onsubmit="handleConfirmFlagWrongFile(event)">
+        <input type="hidden" id="flagCaseNumber">
+        <div id="flagCaseInfoDisplay" style="background: #fffbeb; border: 1px solid #fcd34d; padding: 0.75rem; border-radius: 0.5rem; margin-bottom: 1rem; font-size: 0.85rem; color: #92400e;"></div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.75rem;">ส่งคืนคำร้องไปยังพนักงานสอบสวนเจ้าของสำนวน เพื่อเปิดให้สามารถอัพโหลดไฟล์ PDF ฉบับแก้ไขใหม่ได้ทันที</p>
+
+        <div class="form-group">
+          <label for="flagReasonInput"><i class="fa-solid fa-triangle-exclamation" style="color: #d97706;"></i> เหตุผลการส่งคืนคำร้อง</label>
+          <textarea id="flagReasonInput" class="form-control" rows="3" placeholder="เช่น เอกสารเลือนราง, ลายเซ็นไม่ครบถ้วน, ไฟล์ไม่ตรงกับเลขคดี, ขอให้แนบเอกสารเพิ่มเติม..." required></textarea>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.25rem;">
+          <button type="button" onclick="closeModal('flagWrongFileModal')" class="btn-secondary">ยกเลิก</button>
+          <button type="submit" class="btn-primary" style="width: auto; background-color: #d97706; border-color: #d97706;">
+            <i class="fa-solid fa-rotate-left"></i> ส่งคืนคำร้อง
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- MODAL: CHANGE PASSWORD (เปลี่ยนรหัสผ่าน) -->
   <div id="changePasswordModal" class="modal-overlay">
     <div class="glass-panel modal-container" style="max-width: 480px; width: 92%;">
@@ -513,6 +543,6 @@
   </div>
 
   <!-- System JavaScript -->
-  <script src="app.js?v=2.2.0"></script>
+  <script src="app.js?v=2.8.0"></script>
 </body>
 </html>

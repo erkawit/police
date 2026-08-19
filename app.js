@@ -558,7 +558,14 @@ function generateICS(cases, calendarName, now = new Date()) {
 // 4. DATA PERSISTENCE & LOCAL STORAGE ENGINE
 // --------------------------------------------------------------------------
 
-const DEFAULT_USERS = [];
+const DEFAULT_USERS = [
+  { username: 'admin', password: 'caogikojt02', role: 'admin', station: '', name: 'ผู้ดูแลระบบสูงสุด (System Admin)', status: 'approved' },
+  { username: 'officer01', password: '123456', role: 'officer', station: '', name: 'เจ้าหน้าที่ศาลจังหวัดอุดรธานี', status: 'approved' },
+  { username: 'head-office01', password: '123456', role: 'officer', station: '', name: 'นายณัฐพงศ์ กุบแก้ว', status: 'approved' },
+  { username: 'Polish-S160*', password: '$Police0124', role: 'police', station: 'สภ.เมืองอุดรธานี', name: 'พนักงานสอบสวน สภ.เมืองอุดรธานี 01', status: 'approved' },
+  { username: 'Polish-T698@', password: 'kp@Tv9gH', role: 'police', station: 'สภ.เมืองอุดรธานี', name: 'พนักงานสอบสวน สภ.เมืองอุดรธานี 02', status: 'approved' },
+  { username: 'Polish-C169&', password: 'u*UUi67#', role: 'police', station: 'สภ.เมืองอุดรธานี', name: 'พนักงานสอบสวน สภ.เมืองอุดรธานี 03', status: 'approved' }
+];
 
 const DEFAULT_HOLIDAYS = [
   { date: "2026-01-01", name: "วันขึ้นปีใหม่" },
@@ -575,24 +582,33 @@ const DEFAULT_HOLIDAYS = [
   { date: "2026-12-31", name: "วันสิ้นปี" }
 ];
 function initDatabase() {
-  if (!localStorage.getItem('eredt_users')) {
-    localStorage.setItem('eredt_users', JSON.stringify(DEFAULT_USERS));
+  try {
+    const curUsers = localStorage.getItem('eredt_users');
+    if (!curUsers || curUsers === '[]') {
+      localStorage.setItem('eredt_users', JSON.stringify(DEFAULT_USERS));
+      inMemoryUsers = null;
+    }
+    if (!localStorage.getItem('eredt_requests')) {
+      localStorage.setItem('eredt_requests', JSON.stringify([]));
+    }
+    if (!localStorage.getItem('eredt_holidays')) {
+      localStorage.setItem('eredt_holidays', JSON.stringify(DEFAULT_HOLIDAYS));
+    }
+    
+    const curCsv = localStorage.getItem('eredt_google_csv');
+    if (!curCsv || curCsv.includes('1Y-OA9B8cPRwTcILCB9lmLny2GrfcEnNqR5i07lTGDM4')) {
+      localStorage.setItem('eredt_google_csv', DEFAULT_GOOGLE_SHEET_CSV);
+    }
+    if (!localStorage.getItem('eredt_google_script')) {
+      localStorage.setItem('eredt_google_script', DEFAULT_GOOGLE_SCRIPT_WEBAPP);
+    }
+  } catch (e) {
+    console.warn('police initDatabase localStorage error:', e);
+    if (!inMemoryUsers || inMemoryUsers.length === 0) {
+      inMemoryUsers = [...DEFAULT_USERS];
+    }
   }
-  if (!localStorage.getItem('eredt_requests')) {
-    localStorage.setItem('eredt_requests', JSON.stringify([]));
-  }
-  if (!localStorage.getItem('eredt_holidays')) {
-    localStorage.setItem('eredt_holidays', JSON.stringify(DEFAULT_HOLIDAYS));
-  }
-  
-  const curCsv = localStorage.getItem('eredt_google_csv');
-  if (!curCsv || curCsv.includes('1Y-OA9B8cPRwTcILCB9lmLny2GrfcEnNqR5i07lTGDM4')) {
-    localStorage.setItem('eredt_google_csv', DEFAULT_GOOGLE_SHEET_CSV);
-  }
-  if (!localStorage.getItem('eredt_google_script')) {
-    localStorage.setItem('eredt_google_script', DEFAULT_GOOGLE_SCRIPT_WEBAPP);
-  }
-  initRealtimeChannel();
+  try { initRealtimeChannel(); } catch (e) { console.warn('BroadcastChannel init error:', e); }
 }
 
 function clearMockData() {
@@ -646,9 +662,14 @@ function getUsers() {
   if (inMemoryUsers && Array.isArray(inMemoryUsers) && inMemoryUsers.length > 0) {
     return inMemoryUsers;
   }
-  let users = JSON.parse(localStorage.getItem('eredt_users') || '[]');
-  if (!Array.isArray(users)) {
-    users = [];
+  let users = [];
+  try {
+    users = JSON.parse(localStorage.getItem('eredt_users') || '[]');
+  } catch (e) {
+    console.warn('police getUsers localStorage error:', e);
+  }
+  if (!Array.isArray(users) || users.length === 0) {
+    users = [...DEFAULT_USERS];
   }
   users = users.filter(u => u && u.username && String(u.username).trim() !== '');
   inMemoryUsers = users;
@@ -665,13 +686,53 @@ function saveUsers(users) {
   broadcastRealtimeUpdate('USERS_UPDATED');
 }
 
+function deduplicateRequests(reqs) {
+  if (!Array.isArray(reqs)) return [];
+  const map = new Map();
+  reqs.forEach(r => {
+    if (!r || !r.caseNumber) return;
+    const key = String(r.caseNumber).trim();
+    if (!key) return;
+    
+    if (!map.has(key)) {
+      map.set(key, { ...r, caseNumber: key });
+    } else {
+      // Merge properties: prioritize record with station, officer, fileName, occasions or updated history
+      const existing = map.get(key);
+      const merged = { ...existing };
+      
+      if (!merged.station && r.station) merged.station = r.station;
+      if (!merged.officer && r.officer) merged.officer = r.officer;
+      if (!merged.fileName && r.fileName) {
+        merged.fileName = r.fileName;
+        merged.fileUrl = r.fileUrl;
+      }
+      if (r.downloaded) merged.downloaded = true;
+      if (r.closed) {
+        merged.closed = true;
+        merged.closedDate = r.closedDate || merged.closedDate;
+      }
+      if (Array.isArray(r.occasions) && r.occasions.length > (merged.occasions?.length || 0)) {
+        merged.occasions = r.occasions;
+      }
+      if (Array.isArray(r.history) && r.history.length > (merged.history?.length || 0)) {
+        merged.history = r.history;
+      }
+      map.set(key, merged);
+    }
+  });
+  return Array.from(map.values());
+}
+window.deduplicateRequests = deduplicateRequests;
+
 function getRequests() {
   if (inMemoryRequests && Array.isArray(inMemoryRequests)) {
     return inMemoryRequests;
   }
-  const reqs = JSON.parse(localStorage.getItem('eredt_requests') || '[]');
+  const rawReqs = JSON.parse(localStorage.getItem('eredt_requests') || '[]');
+  const reqs = deduplicateRequests(rawReqs);
   // Sanitize existing cases if any contain invalid date strings
-  let modified = false;
+  let modified = (rawReqs.length !== reqs.length);
   reqs.forEach(r => {
     if (r.remandHistory && Array.isArray(r.remandHistory)) {
       r.remandHistory.forEach(h => {
@@ -694,7 +755,7 @@ function getRequests() {
 }
 
 function saveRequests(requests) {
-  inMemoryRequests = requests || [];
+  inMemoryRequests = deduplicateRequests(requests || []);
   localStorage.setItem('eredt_requests', JSON.stringify(inMemoryRequests));
   if (inMemoryRequests && inMemoryRequests.length > 0) {
     syncToGoogleSheet('saveRequests', { requests: inMemoryRequests });
@@ -875,6 +936,41 @@ function handleRealtimeMessage(msg) {
       }
     }
     showRealtimeToast('⚡ ข้อมูลอัปเดตแบบ Realtime แล้ว');
+
+    // Immediate Realtime Alert for Case Return to Police Officer
+    if (msg.type === 'CASE_RETURNED' && msg.payload && currentUser.role === 'police') {
+      const p = msg.payload;
+      const isTargetPolice = (currentUser.username && p.officer && currentUser.username === p.officer) ||
+                             (!p.officer && currentUser.station && currentUser.station === p.station) ||
+                             (currentUser.station && currentUser.station === p.station);
+      if (isTargetPolice) {
+        Swal.fire({
+          icon: 'warning',
+          title: '⚠️ แจ้งเตือน: ศาลส่งคืนคำร้องฝากขัง!',
+          html: `
+            <div style="text-align: left; background: #fffbeb; border: 1.5px solid #fcd34d; border-radius: 0.75rem; padding: 1rem; margin-top: 0.5rem;">
+              <div style="font-size: 1.05rem; font-weight: 700; color: #b45309; margin-bottom: 0.5rem;">
+                <i class="fa-solid fa-triangle-exclamation"></i> เลขฝากขัง: <b>${p.caseNumber}</b> ${p.k ? `(ครั้งที่ ${p.k})` : ''}
+              </div>
+              <div style="font-size: 0.9rem; color: #1e293b; margin-bottom: 0.5rem;">
+                <b>เหตุผลที่ศาลส่งคืน:</b> ${p.reason || 'เอกสารไม่ถูกต้อง กรุณาตรวจสอบและอัพโหลดใหม่'}
+              </div>
+              <div style="font-size: 0.825rem; color: #64748b;">
+                เจ้าหน้าที่ศาลได้ตรวจสอบและส่งคืนคำร้อง เพื่อให้ท่านทำการแนบไฟล์ PDF ฉบับแก้ไขและอัพโหลดส่งใหม่อีกครั้ง
+              </div>
+            </div>
+            <p style="font-size: 0.825rem; color: #dc2626; margin-top: 0.75rem; font-weight: 600; text-align: left;">
+              <i class="fa-solid fa-clock"></i> กรุณาอัพโหลดไฟล์แก้ไขใหม่ก่อนเวลา 16.00 น.
+            </p>
+          `,
+          confirmButtonColor: '#1e3a8a',
+          confirmButtonText: '<i class="fa-solid fa-folder-open"></i> ไปที่รายการคำร้องเพื่อแนบไฟล์ใหม่',
+          allowOutsideClick: false
+        }).then(() => {
+          if (typeof switchView === 'function') switchView('requests');
+        });
+      }
+    }
   }
 }
 
@@ -1041,8 +1137,19 @@ window.updateLiveUploadButtonsState = updateLiveUploadButtonsState;
 // --------------------------------------------------------------------------
 
 function checkSession() {
-  initDatabase();
-  const savedUser = sessionStorage.getItem('eredt_session');
+  try {
+    initDatabase();
+  } catch (e) {
+    console.warn('initDatabase error:', e);
+  }
+
+  let savedUser = null;
+  try {
+    savedUser = sessionStorage.getItem('eredt_session');
+  } catch (e) {
+    console.warn('sessionStorage read error:', e);
+  }
+
   if (savedUser) {
     try {
       currentUser = JSON.parse(savedUser);
@@ -1053,9 +1160,11 @@ function checkSession() {
     currentUser = null;
   }
 
-  if (currentUser) {
+  if (currentUser && currentUser.username && currentUser.role) {
     renderAppLayout();
   } else {
+    currentUser = null;
+    try { sessionStorage.removeItem('eredt_session'); } catch (e) { /* ignore */ }
     showLoginView();
   }
 }
@@ -1133,6 +1242,7 @@ async function handleLogin(event) {
     }
 
     currentUser = user;
+    hasAlertedReturnedCasesSession = false;
     sessionStorage.setItem('eredt_session', JSON.stringify(user));
     
     Swal.fire({
@@ -1290,6 +1400,61 @@ function renderAppLayout() {
   }
   
   switchView(savedView);
+  
+  // Check for any returned cases and alert the police officer upon login
+  setTimeout(() => {
+    checkReturnedCasesOnLogin();
+  }, 400);
+}
+
+let hasAlertedReturnedCasesSession = false;
+
+function checkReturnedCasesOnLogin() {
+  if (!currentUser || currentUser.role !== 'police') return;
+  if (hasAlertedReturnedCasesSession) return;
+  
+  const requests = getRequests();
+  const returnedCases = requests.filter(r => 
+    !r.closed && 
+    r.courtFlag && 
+    (r.officer === currentUser.username || (!r.officer && r.station === currentUser.station))
+  );
+
+  if (returnedCases.length > 0) {
+    hasAlertedReturnedCasesSession = true;
+    const casesHtml = returnedCases.map(c => `
+      <div style="background: #fffbeb; border: 1.5px solid #fcd34d; border-radius: 0.5rem; padding: 0.75rem; margin-bottom: 0.5rem; text-align: left;">
+        <div style="font-weight: 700; color: #b45309; font-size: 0.95rem;">
+          <i class="fa-solid fa-triangle-exclamation"></i> เลขฝากขัง: <b>${c.caseNumber}</b> (ครั้งที่ ${c.k || 1})
+        </div>
+        <div style="font-size: 0.85rem; color: #1e293b; margin-top: 0.25rem;">
+          <b>เหตุผลที่ศาลส่งคืน:</b> ${c.courtFlag.reason || 'เอกสารไม่ถูกต้อง กรุณาอัพโหลดไฟล์ใหม่'}
+        </div>
+        ${c.courtFlag.flaggedAt ? `<div style="font-size: 0.75rem; color: #78350f; margin-top: 0.2rem;">ส่งคืนเมื่อ: ${formatThaiDate(c.courtFlag.flaggedAt)}</div>` : ''}
+      </div>
+    `).join('');
+
+    Swal.fire({
+      icon: 'warning',
+      title: '⚠️ แจ้งเตือน: มีคำร้องฝากขังถูกศาลส่งคืน!',
+      html: `
+        <p style="font-size: 0.9rem; color: #475569; margin-bottom: 0.75rem; text-align: left;">
+          พบรายการคำร้องฝากขังของท่านจำนวน <b>${returnedCases.length}</b> รายการ ที่เจ้าหน้าที่ศาลตรวจสอบแล้วส่งคืนกลับมาให้แก้ไข:
+        </p>
+        <div style="max-height: 240px; overflow-y: auto;">
+          ${casesHtml}
+        </div>
+        <p style="font-size: 0.825rem; color: #dc2626; margin-top: 0.75rem; font-weight: 600; text-align: left;">
+          <i class="fa-solid fa-clock"></i> กรุณาตรวจสอบและแนบไฟล์ PDF ฉบับแก้ไขใหม่ก่อนเวลา 16.00 น. ของวันทำการ
+        </p>
+      `,
+      confirmButtonColor: '#1e3a8a',
+      confirmButtonText: '<i class="fa-solid fa-folder-open"></i> ไปที่รายการคำร้อง',
+      allowOutsideClick: false
+    }).then(() => {
+      if (typeof switchView === 'function') switchView('requests');
+    });
+  }
 }
 
 function switchView(viewName, event, subTab) {
@@ -3177,30 +3342,93 @@ function handleConfirmReceiveOccasion(event) {
 function openFlagModal(caseNumber) {
   setElementValue('flagCaseNumber', caseNumber);
   setElementValue('flagReasonInput', '');
+  
+  const requests = getRequests();
+  const c = requests.find(r => r.caseNumber === caseNumber);
+  const infoEl = document.getElementById('flagCaseInfoDisplay');
+  if (infoEl) {
+    if (c) {
+      infoEl.innerHTML = `
+        <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.25rem;">
+          <i class="fa-solid fa-file-signature" style="color: #d97706;"></i> เลขฝากขัง: <b>${c.caseNumber}</b> (ครั้งที่ ${c.k || 1})
+        </div>
+        <div style="font-size: 0.8rem; color: #78350f;">
+          สถานีตำรวจ: <b>${c.station || 'ยังไม่ระบุ'}</b> | พนักงานสอบสวน: <b>${c.officer || 'ยังไม่มีผู้รับ'}</b>
+        </div>
+        ${c.fileName ? `<div style="font-size: 0.8rem; color: #dc2626; margin-top: 0.25rem;"><i class="fa-solid fa-file-pdf"></i> ไฟล์ปัจจุบัน: ${c.fileName}</div>` : ''}
+      `;
+    } else {
+      infoEl.textContent = `เลขคดี: ${caseNumber}`;
+    }
+  }
+
   openModal('flagWrongFileModal');
 }
 
 function handleConfirmFlagWrongFile(event) {
   event.preventDefault();
   const caseNumber = document.getElementById('flagCaseNumber')?.value || '';
-  const reason = document.getElementById('flagReasonInput')?.value || '';
+  const reason = document.getElementById('flagReasonInput')?.value?.trim() || '';
+
+  if (!reason) {
+    Swal.fire({
+      icon: 'warning',
+      title: 'กรุณาระบุเหตุผลการส่งคืนคำร้อง',
+      text: 'โปรดระบุสาเหตุ เช่น เอกสารไม่ถูกต้อง, ไฟล์เลือนราง หรือลายเซ็นไม่ครบถ้วน เพื่อให้พนักงานสอบสวนแก้ไขได้ถูกต้อง'
+    });
+    return;
+  }
 
   const requests = getRequests();
   const index = requests.findIndex(r => r.caseNumber === caseNumber);
 
-  if (index !== -1) {
-    const result = flagWrongFile(requests[index], reason);
-    if (result.ok) {
-      requests[index] = result.case;
-      saveRequests(requests);
-
-      closeModal('flagWrongFileModal');
-      Swal.fire({ icon: 'success', title: 'ส่งคำแจ้งเตือนไฟล์ผิดเรียบร้อย', timer: 1500, showConfirmButton: false });
-      renderCourtView();
-    } else {
-      Swal.fire({ icon: 'error', title: 'แจ้งไฟล์ผิดไม่สำเร็จ', text: result.reason });
-    }
+  if (index === -1) {
+    Swal.fire({ icon: 'error', title: 'ไม่พบข้อมูลคดีนี้ในระบบ' });
+    return;
   }
+
+  const targetCase = requests[index];
+
+  // User requirement confirmation prompt
+  Swal.fire({
+    title: 'ยืนยันการส่งคืนคำร้อง?',
+    html: `หากยืนยันจะเป็นการส่งแจ้งกลับไปยัง <b>พนักงานสอบสวนที่ทำสำนวนฝากขังเลข ${caseNumber}</b><br><br>ท่านต้องการยืนยันหรือไม่?`,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonColor: '#d97706',
+    cancelButtonColor: '#64748b',
+    confirmButtonText: '<i class="fa-solid fa-rotate-left"></i> ยืนยันส่งคืนคำร้อง',
+    cancelButtonText: 'ยกเลิก'
+  }).then((result) => {
+    if (result.isConfirmed) {
+      const res = flagWrongFile(targetCase, reason);
+      if (res.ok) {
+        requests[index] = res.case;
+        saveRequests(requests);
+
+        // Broadcast realtime notification specifically for this case return
+        broadcastRealtimeUpdate('CASE_RETURNED', {
+          caseNumber: targetCase.caseNumber,
+          reason: reason,
+          officer: targetCase.officer || '',
+          station: targetCase.station || '',
+          k: targetCase.k || 1
+        });
+
+        closeModal('flagWrongFileModal');
+        Swal.fire({ 
+          icon: 'success', 
+          title: 'ส่งคืนคำร้องเรียบร้อยแล้ว', 
+          html: `ระบบได้ส่งแจ้งเตือนส่งคืนคำร้องเลขฝากขัง <b>${caseNumber}</b> ไปยังพนักงานสอบสวนเจ้าของสำนวนเรียบร้อยแล้ว`,
+          timer: 2500, 
+          showConfirmButton: false 
+        });
+        renderCourtView();
+      } else {
+        Swal.fire({ icon: 'error', title: 'ส่งคืนคำร้องไม่สำเร็จ', text: res.reason });
+      }
+    }
+  });
 }
 
 // --------------------------------------------------------------------------
@@ -3975,8 +4203,9 @@ async function fetchLiveGoogleSheetData(options = {}) {
     updateProgress(95, 'กำลังอัพเดทระบบ...');
 
     if (Array.isArray(requestsData)) {
-      inMemoryRequests = requestsData;
-      localStorage.setItem('eredt_requests', JSON.stringify(requestsData));
+      const cleanReqs = deduplicateRequests(requestsData);
+      inMemoryRequests = cleanReqs;
+      localStorage.setItem('eredt_requests', JSON.stringify(cleanReqs));
     }
 
     if (Array.isArray(usersData) && usersData.length > 0) {
@@ -4430,10 +4659,23 @@ function openMobileUserActionModal(username) {
 // 12. INITIALIZATION ON DOM LOAD
 // --------------------------------------------------------------------------
 
-document.addEventListener('DOMContentLoaded', () => {
-  checkSession();
-  initThaiDatePickers();
-});
+function startApp() {
+  try {
+    checkSession();
+  } catch (e) {
+    console.error('checkSession error:', e);
+    showLoginView();
+  }
+  try { initThaiDatePickers(); } catch (e) { console.warn('initThaiDatePickers error:', e); }
+  // Fetch live Google Sheet data in background on load so mobile and desktop always have latest records & users
+  try { fetchLiveGoogleSheetData({ isSilent: true }); } catch (e) { console.warn('fetchLiveGoogleSheetData error:', e); }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', startApp);
+} else {
+  startApp();
+}
 
 
 function downloadStationBatch(dateStr, stationName) {

@@ -117,14 +117,49 @@ body.theme-police .modal-container {
   -webkit-font-smoothing: antialiased;
 }
 
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden;
+  box-sizing: border-box;
+}
+
 body {
   background-color: #ffffff !important;
   background: #ffffff !important;
   color: var(--text-main);
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow-x: hidden;
+  position: relative;
+}
+
+/* Form Rows */
+.form-row {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+  width: 100%;
+}
+
+.form-row > .form-group {
+  flex: 1;
+  min-width: 140px;
+}
+
+/* Container & Structure Max Width Protection */
+.app-header,
+.app-body-container,
+.main-content,
+.white-panel,
+.glass-panel,
+.table-container {
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 /* Header Navbar */
@@ -641,17 +676,17 @@ body {
 .form-control {
   width: 100%;
   padding: 0.75rem 1rem;
-  background: var(--input-bg);
-  border: 1px solid var(--card-border);
+  background: #ffffff !important;
+  border: 1.5px solid #cbd5e1 !important;
   border-radius: 0.6rem;
-  color: var(--text-main);
+  color: #0f172a !important;
   font-size: 0.9rem;
   outline: none;
   transition: all 0.2s;
 }
 
 .form-control:focus {
-  border-color: var(--primary);
+  border-color: var(--primary) !important;
   box-shadow: 0 0 0 3px rgba(30, 58, 138, 0.15);
 }
 
@@ -1045,18 +1080,21 @@ table.data-table tr:hover td {
   bottom: 0;
   background: rgba(15, 23, 42, 0.6);
   backdrop-filter: blur(4px);
-  z-index: 100;
+  -webkit-backdrop-filter: blur(4px);
+  z-index: 1050;
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 1rem;
   opacity: 0;
+  visibility: hidden;
   pointer-events: none;
-  transition: opacity 0.3s ease;
+  transition: opacity 0.25s ease, visibility 0.25s ease;
 }
 
 .modal-overlay.active {
   opacity: 1;
+  visibility: visible;
   pointer-events: auto;
 }
 
@@ -1139,6 +1177,69 @@ table.data-table tr:hover td {
 }
 
 @media (max-width: 768px) {
+  /* 0. Mobile Login Screen Responsive Optimization (< 768px) */
+  .login-wrapper {
+    min-height: 100vh !important;
+    min-height: 100dvh !important;
+    padding: 1.25rem 0.85rem !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    background-color: #ffffff !important;
+    width: 100% !important;
+  }
+
+  .login-card {
+    padding: 1.75rem 1.25rem !important;
+    border-radius: 1rem !important;
+    box-shadow: 0 4px 20px rgba(15, 23, 42, 0.08) !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    margin: auto !important;
+    background: #ffffff !important;
+  }
+
+  .login-header {
+    margin-bottom: 1.5rem !important;
+  }
+
+  .login-header img {
+    height: 54px !important;
+    width: auto !important;
+    margin-bottom: 0.75rem !important;
+  }
+
+  .login-header h1 {
+    font-size: 1.35rem !important;
+    line-height: 1.3 !important;
+  }
+
+  .login-header p {
+    font-size: 0.825rem !important;
+    line-height: 1.4 !important;
+  }
+
+  .login-card .form-group {
+    margin-bottom: 1rem !important;
+  }
+
+  .login-card .form-group label {
+    font-size: 0.825rem !important;
+    margin-bottom: 0.35rem !important;
+  }
+
+  .login-card .form-control {
+    padding: 0.75rem 0.85rem !important;
+    font-size: 0.95rem !important;
+    border-radius: 0.5rem !important;
+  }
+
+  .login-card .btn-primary {
+    padding: 0.75rem 1rem !important;
+    font-size: 0.95rem !important;
+    border-radius: 0.5rem !important;
+  }
+
   /* 1. Top Header Modifications for Mobile (< 768px) */
   .sidebar {
     display: none !important; /* Hide desktop top/sidebar menu bar on mobile */
@@ -1146,6 +1247,9 @@ table.data-table tr:hover td {
 
   .app-header {
     padding: 0.5rem 0.85rem;
+    width: 100% !important;
+    max-width: 100vw !important;
+    box-sizing: border-box !important;
   }
 
   .logo-title {
@@ -1167,12 +1271,107 @@ table.data-table tr:hover td {
     display: none !important;
   }
 
+  /* Layout & Viewport Containment on Mobile (< 768px) */
+  html, body, .app-body-container, .main-content {
+    max-width: 100vw !important;
+    width: 100% !important;
+    overflow-x: hidden !important;
+    box-sizing: border-box !important;
+  }
+
+  .white-panel, .glass-panel {
+    padding: 1rem 0.85rem !important;
+    border-radius: 0.75rem !important;
+    max-width: 100% !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    overflow-x: hidden !important;
+  }
+
+  /* Form Rows on Mobile: Stack vertically with full width */
+  .form-row {
+    flex-direction: column !important;
+    gap: 0.75rem !important;
+    width: 100% !important;
+  }
+
+  .form-row > .form-group {
+    min-width: 0 !important;
+    width: 100% !important;
+    flex: 1 1 100% !important;
+  }
+
+  /* View Header & Toolbar on Mobile */
+  .view-header {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 0.75rem !important;
+    margin-bottom: 1rem !important;
+    width: 100% !important;
+  }
+
+  .view-header > div {
+    width: 100% !important;
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 0.5rem !important;
+  }
+
+  .view-header button,
+  .view-header .btn-primary,
+  .view-header .btn-secondary {
+    flex: 1 1 auto !important;
+    width: auto !important;
+    min-width: 120px !important;
+    padding: 0.5rem 0.75rem !important;
+    font-size: 0.825rem !important;
+    justify-content: center !important;
+  }
+
+  .view-title h2 {
+    font-size: 1.15rem !important;
+    line-height: 1.3 !important;
+  }
+
+  .view-title p {
+    font-size: 0.775rem !important;
+    line-height: 1.4 !important;
+  }
+
+  /* Stats Grid on Mobile */
+  .stats-grid {
+    grid-template-columns: 1fr !important;
+    gap: 0.65rem !important;
+    margin-bottom: 1rem !important;
+    width: 100% !important;
+  }
+
+  .stat-card {
+    padding: 0.85rem 1rem !important;
+  }
+
+  .stat-icon {
+    width: 42px !important;
+    height: 42px !important;
+    font-size: 1.15rem !important;
+  }
+
+  .stat-value {
+    font-size: 1.35rem !important;
+  }
+
+  .stat-label {
+    font-size: 0.775rem !important;
+  }
+
   /* Requirement 1: Hide Calendar Grid & Show Mobile Today ListView on Mobile (< 768px) */
   .calendar-wrapper {
     display: none !important;
   }
   .mobile-today-panel {
     display: block !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
   }
 
   /* Remove view header title icons on mobile (< 768px) */
@@ -1183,6 +1382,9 @@ table.data-table tr:hover td {
 
   .main-content {
     padding: 0.85rem 0.85rem 5.5rem 0.85rem !important;
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
   }
 
   /* Requirement 2: DataTables -> Mobile ListView Buttons with Right Arrow Chevron */
@@ -1191,7 +1393,10 @@ table.data-table tr:hover td {
     box-shadow: none !important;
     border: none !important;
     padding: 0 !important;
-    overflow: visible !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
   }
 
   .data-table {
@@ -1219,6 +1424,9 @@ table.data-table tr:hover td {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05) !important;
     cursor: pointer !important;
     transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    word-break: break-word !important;
   }
 
   .data-table tbody tr:active {
@@ -1246,6 +1454,26 @@ table.data-table tr:hover td {
     border: none !important;
     font-size: 0.875rem !important;
     text-align: left !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Mobile Modals */
+  .modal-overlay {
+    padding: 0.5rem !important;
+  }
+
+  .modal-container {
+    max-width: 100% !important;
+    width: 100% !important;
+    padding: 1.25rem 1rem !important;
+    margin: auto !important;
+    border-radius: 1rem !important;
+    max-height: 88vh !important;
+  }
+
+  .modal-header h3 {
+    font-size: 1.05rem !important;
   }
 
   /* 2. Fixed Bottom Bar Navigation & Active Hover State */
@@ -1259,7 +1487,7 @@ table.data-table tr:hover td {
     background: var(--nav-bg);
     border-top: 1px solid rgba(255, 255, 255, 0.15);
     box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
-    z-index: 1000;
+    z-index: 900;
     align-items: center;
     justify-content: space-around;
     padding: 0 0.5rem;
