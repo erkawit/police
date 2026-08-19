@@ -1285,7 +1285,14 @@ function handleLogout() {
 
 function setElementDisplay(id, displayVal) {
   const el = document.getElementById(id);
-  if (el) el.style.display = displayVal;
+  if (el) {
+    el.style.setProperty('display', displayVal, 'important');
+    if (displayVal === 'none') {
+      el.classList.add('hidden');
+    } else {
+      el.classList.remove('hidden');
+    }
+  }
 }
 window.setElementDisplay = setElementDisplay;
 

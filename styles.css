@@ -1250,14 +1250,20 @@ table.data-table tr:hover td {
 @media (max-width: 768px) {
   /* 0. Mobile Login Screen Responsive Optimization (< 768px) */
   .login-wrapper {
-    min-height: 100vh !important;
-    min-height: 100dvh !important;
-    padding: 1.25rem 0.85rem !important;
-    display: flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    background-color: #ffffff !important;
-    width: 100% !important;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 1.25rem 0.85rem;
+    align-items: center;
+    justify-content: center;
+    background-color: #ffffff;
+    width: 100%;
+  }
+
+  .login-wrapper[style*="display: none"],
+  #loginView[style*="display: none"],
+  #loginView.hidden,
+  .login-wrapper.hidden {
+    display: none !important;
   }
 
   .login-card {
