@@ -406,6 +406,11 @@ body {
   flex-shrink: 0;
 }
 
+/* Hide specific sidebar menu item: "สร้างชุดเลขคำร้อง (ยฝ./ฝ.)" per user directive */
+#navItemCreateBatch {
+  display: none !important;
+}
+
 /* Top Horizontal Navigation Bar - Hidden when sidebar is active */
 .top-nav-bar {
   display: none !important;
@@ -1530,18 +1535,6 @@ table.data-table tr:hover td {
     box-sizing: border-box !important;
   }
 
-  /* Full Width Filters on Mobile */
-  #courtStationFilter,
-  #courtStatusFilter,
-  #courtSearchInput,
-  #holidayMonthFilter,
-  #holidaySearchInput,
-  #printPoliceStationSelect,
-  #btnDownloadAllToday {
-    width: 100% !important;
-    max-width: 100% !important;
-  }
-
   /* Mobile Modals */
   .modal-overlay {
     padding: 0.5rem !important;
@@ -1782,97 +1775,6 @@ table.data-table tr:hover td {
 }
 
 /* ==========================================================================
-   Google Services Configuration & Migration Guide Modal Styling
-   ========================================================================== */
-.guide-tab-nav {
-  display: flex;
-  gap: 0.5rem;
-  border-bottom: 2px solid #e2e8f0;
-  margin-bottom: 1.25rem;
-  overflow-x: auto;
-  padding-bottom: 0.5rem;
-  -webkit-overflow-scrolling: touch;
-}
-
-.guide-tab-btn {
-  padding: 0.55rem 0.9rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  color: #64748b;
-  background: #f8fafc;
-  border: 1px solid #cbd5e1;
-  border-radius: 0.5rem;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: all 0.2s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-}
-
-.guide-tab-btn:hover {
-  background: #eff6ff;
-  color: var(--primary);
-  border-color: #93c5fd;
-}
-
-.guide-tab-btn.active {
-  background: var(--primary);
-  color: #ffffff;
-  border-color: var(--primary);
-  box-shadow: 0 2px 8px rgba(30, 58, 138, 0.25);
-}
-
-.guide-step-card {
-  background: #ffffff;
-  border: 1px solid #e2e8f0;
-  border-radius: 0.75rem;
-  padding: 1.15rem;
-  margin-bottom: 1rem;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-}
-
-.guide-step-number {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  background: var(--primary);
-  color: #ffffff;
-  font-weight: 700;
-  font-size: 0.825rem;
-  border-radius: 50%;
-  margin-right: 0.5rem;
-  flex-shrink: 0;
-}
-
-.guide-code-block {
-  background: #0f172a;
-  color: #38bdf8;
-  padding: 0.85rem 1rem;
-  border-radius: 0.5rem;
-  font-family: 'Consolas', 'Courier New', monospace;
-  font-size: 0.825rem;
-  overflow-x: auto;
-  position: relative;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  word-break: break-all;
-}
-
-.guide-badge-pill {
-  display: inline-block;
-  padding: 0.2rem 0.55rem;
-  font-size: 0.725rem;
-  font-weight: 700;
-  border-radius: 9999px;
-  background: #eff6ff;
-  color: #1d4ed8;
-  border: 1px solid #bfdbfe;
-}
-
-/* ==========================================================================
    DataTables System UX/UI Theme (For screens >= 768px)
    ========================================================================== */
 
@@ -1911,7 +1813,7 @@ table.data-table tr:hover td {
 
 .dataTables_wrapper .dataTables_length select:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(30, 58, 138, 0.15);
+  box-shadow: 0 0 0 2px rgba(120, 0, 0, 0.15);
 }
 
 .dataTables_wrapper .dataTables_filter {
@@ -1932,7 +1834,7 @@ table.data-table tr:hover td {
 
 .dataTables_wrapper .dataTables_filter input:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(30, 58, 138, 0.15);
+  box-shadow: 0 0 0 2px rgba(120, 0, 0, 0.15);
 }
 
 .dataTables_wrapper .dataTables_info {
@@ -1977,7 +1879,7 @@ table.data-table tr:hover td {
   color: #ffffff !important;
   border-color: var(--primary) !important;
   font-weight: 700;
-  box-shadow: 0 2px 4px rgba(30, 58, 138, 0.2);
+  box-shadow: 0 2px 4px rgba(120, 0, 0, 0.2);
 }
 
 .dataTables_wrapper .dataTables_paginate .paginate_button.disabled,
@@ -2036,6 +1938,13 @@ table.dataTable thead th.sorting_desc::after {
   transform: translateY(-50%);
 }
 
+/* Hide legacy search input when DataTables is active on desktop */
+@media (min-width: 768px) {
+  #policeSearchInputWrapper {
+    display: none !important;
+  }
+}
+
 /* Hide DataTables controls on mobile */
 @media (max-width: 767px) {
   .dataTables_wrapper .dataTables_length,
@@ -2044,74 +1953,6 @@ table.dataTable thead th.sorting_desc::after {
   .dataTables_wrapper .dataTables_paginate {
     display: none !important;
   }
-}
-
-/* ==========================================================================
-   Batch User Generator Progress & Live Log Styles
-   ========================================================================== */
-
-.batch-progress-container {
-  background: #e2e8f0;
-  border-radius: 9999px;
-  overflow: hidden;
-  height: 14px;
-  margin: 1.25rem 0 0.65rem 0;
-  position: relative;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.batch-progress-bar {
-  background: linear-gradient(90deg, #1e3a8a, #2563eb, #059669);
-  height: 100%;
-  width: 0%;
-  border-radius: 9999px;
-  transition: width 0.15s ease-in-out;
-  box-shadow: 0 1px 4px rgba(37, 99, 235, 0.4);
-}
-
-.batch-live-log {
-  max-height: 180px;
-  overflow-y: auto;
-  background: #0f172a;
-  color: #38bdf8;
-  font-family: 'Consolas', 'Courier New', monospace;
-  font-size: 0.825rem;
-  padding: 0.85rem 1rem;
-  border-radius: 0.5rem;
-  margin-top: 1rem;
-  text-align: left;
-  line-height: 1.6;
-  border: 1px solid #1e293b;
-}
-
-.batch-log-item {
-  display: flex;
-  justify-content: space-between;
-  border-bottom: 1px dashed rgba(255, 255, 255, 0.12);
-  padding: 0.3rem 0;
-  align-items: center;
-}
-
-.batch-log-item:last-child {
-  border-bottom: none;
-}
-
-.batch-log-badge {
-  background: #1e3a8a;
-  color: #93c5fd;
-  padding: 0.1rem 0.4rem;
-  border-radius: 4px;
-  font-size: 0.75rem;
-  font-weight: 700;
-  margin-right: 0.4rem;
-}
-
-.batch-log-pass {
-  color: #fbbf24;
-  font-weight: 600;
-  background: rgba(251, 191, 36, 0.1);
-  padding: 0.1rem 0.4rem;
-  border-radius: 4px;
 }
 
 /* Copy Button Inline */
@@ -2132,9 +1973,9 @@ table.dataTable thead th.sorting_desc::after {
 }
 
 .btn-icon-copy:hover {
-  background: #1e3a8a;
+  background: #7f1d1d;
   color: #ffffff !important;
-  border-color: #1e3a8a;
+  border-color: #7f1d1d;
   transform: scale(1.08);
 }
 
