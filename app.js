@@ -11,6 +11,7 @@ if (typeof pdfjsLib !== 'undefined') {
 const SPREADSHEET_ID = '1yoznW_FWEf5BLKOdqn110oTZj5zJg4KbsKsogoh-6g4';
 const DEFAULT_GOOGLE_SHEET_CSV = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/pub?output=csv`;
 const DEFAULT_GOOGLE_SCRIPT_WEBAPP = '';
+const EREDT_API_KEY = 'eredt-udon-2569';
 const DEFAULT_DRIVE_FOLDER_ID = '1l5ZDlXI14lgFc6WGqmZ3kQ9qB-ci-ArM';
 
 // --------------------------------------------------------------------------
@@ -300,22 +301,32 @@ function uploadFile(rawCase, file, holidays, now = new Date()) {
   if (rawCase.closed) {
     return { case: rawCase, ok: false, reason: "คดีนี้ปิดสำนวนเสร็จสิ้นแล้ว ไม่สามารถอัพโหลดไฟล์เพิ่มได้" };
   }
-  const windowCheck = checkSubmissionWindow(now);
-  if (!windowCheck.isOpen) {
-    return { case: rawCase, ok: false, reason: windowCheck.message };
-  }
-  const cumulativeDays = rawCase.cumulativeDays ?? (12 * ((rawCase.k || 2) - 1));
-  const { filingDeadline } = computeOccasionDeadlines(rawCase.startDate, cumulativeDays, holidays);
-  if (isPastCutoff(filingDeadline, now)) {
-    return { case: rawCase, ok: false, reason: "เลยเวลา 16.00 น. ของวันที่ต้องยื่นแล้ว กรุณานำคำร้องไปยื่นต่อศาลด้วยตนเอง" };
+
+  // ตรวจสอบว่าคดีนี้ถูกส่งคืนจากศาลจริงหรือไม่
+  const isReturnedByCourt = Boolean(
+    (rawCase.courtFlag && rawCase.courtFlag.reason) || 
+    (rawCase.courtReturn && rawCase.courtReturn.reason) || 
+    (Array.isArray(rawCase.history) && rawCase.history.some(h => h.type === 'court_returned'))
+  );
+
+  if (!isReturnedByCourt) {
+    const windowCheck = checkSubmissionWindow(now);
+    if (!windowCheck.isOpen) {
+      return { case: rawCase, ok: false, reason: windowCheck.message };
+    }
+    const cumulativeDays = rawCase.cumulativeDays ?? (12 * ((rawCase.k || 2) - 1));
+    const { filingDeadline } = computeOccasionDeadlines(rawCase.startDate, cumulativeDays, holidays);
+    if (isPastCutoff(filingDeadline, now)) {
+      return { case: rawCase, ok: false, reason: "เลยเวลา 16.00 น. ของวันที่ต้องยื่นแล้ว กรุณานำคำร้องไปยื่นต่อศาลด้วยตนเอง" };
+    }
   }
 
-  const isReupload = Boolean(rawCase.fileName || rawCase.courtFlag || rawCase.courtReturn);
+  const isReupload = Boolean(rawCase.fileName || rawCase.courtFlag || rawCase.courtReturn || isReturnedByCourt);
   const nowISO = toISO(now);
   const history = rawCase.history ? [...rawCase.history] : [];
   history.push({
     type: isReupload ? 'reupload' : 'upload',
-    title: isReupload ? 'พนักงานสอบสวนอัพโหลดไฟล์แก้ไขใหม่' : 'พนักงานสอบสวนอัพโหลดไฟล์คำร้อง',
+    title: isReturnedByCourt ? 'พนักงานสอบสวนอัพโหลดไฟล์แก้ไขใหม่ตามที่ศาลส่งคืน' : (isReupload ? 'พนักงานสอบสวนอัพโหลดไฟล์แก้ไขใหม่' : 'พนักงานสอบสวนอัพโหลดไฟล์คำร้อง'),
     fileName: file.name,
     timestamp: nowISO,
     by: (typeof currentUser !== 'undefined' && currentUser) ? (currentUser.name || currentUser.username) : 'พนักงานสอบสวน'
@@ -826,7 +837,7 @@ function syncToGoogleSheet(actionName, payload) {
   if (!scriptUrl) return;
   
   try {
-    fetch(scriptUrl, {
+    fetch(`${scriptUrl}?key=${EREDT_API_KEY}`, {
       method: 'POST',
       mode: 'no-cors',
       headers: { 'Content-Type': 'application/json' },
@@ -1208,7 +1219,7 @@ async function handleLogin(event) {
 
       if (scriptUrl && scriptUrl.trim() !== '') {
         try {
-          const res = await fetch(`${scriptUrl}?action=getUsers`);
+          const res = await fetch(`${scriptUrl}?key=${EREDT_API_KEY}&action=getUsers`);
           liveUsers = await res.json();
         } catch (e) {
           console.warn('Login live check Apps Script error:', e);
@@ -1240,6 +1251,23 @@ async function handleLogin(event) {
         icon: 'warning',
         title: 'บัญชีผู้ใช้ยังไม่ได้รับอนุมัติ',
         text: 'บัญชีของคุณอยู่ระหว่างการรออนุมัติสิทธิจากผู้ดูแลระบบ'
+      });
+      return;
+    }
+
+    // ตรวจสอบ role — ป้องกัน Cross-role Login Crash
+    if (user.role !== 'police') {
+      Swal.fire({
+        icon: 'warning',
+        title: 'บัญชีนี้ไม่ใช่พนักงานสอบสวน',
+        html: `<p>บัญชี <b>${user.username}</b> มีสิทธิ์เป็น <b>${user.role === 'officer' ? 'เจ้าหน้าที่ศาล' : user.role === 'admin' ? 'ผู้ดูแลระบบ' : user.role}</b></p><p>กรุณาเข้าสู่ระบบผ่าน <a href="../court/index.html" style="color: #2563eb; font-weight: 700;">ระบบศาลจังหวัดอุดรธานี</a> แทน</p>`,
+        confirmButtonText: 'ไปหน้าระบบศาล',
+        showCancelButton: true,
+        cancelButtonText: 'ปิด'
+      }).then(result => {
+        if (result.isConfirmed) {
+          window.location.href = '../court/index.html';
+        }
       });
       return;
     }
@@ -2193,8 +2221,15 @@ function renderPoliceTable() {
 
       let actionButtons = '';
       if (!c.closed) {
+        const isReturnedByCourt = Boolean(
+          (c.courtFlag && c.courtFlag.reason) || 
+          (c.courtReturn && c.courtReturn.reason) || 
+          (Array.isArray(c.history) && c.history.some(h => h.type === 'court_returned'))
+        );
+        const courtReturnReason = (c.courtFlag && c.courtFlag.reason) || (c.courtReturn && c.courtReturn.reason) || '';
+
         const windowCheck = checkSubmissionWindow();
-        const isClosedTime = isPast || !windowCheck.isOpen;
+        const isClosedTime = !isReturnedByCourt && (isPast || !windowCheck.isOpen);
 
         if (c.fileName) {
           // File HAS been uploaded -> Show Preview PDF + re-upload & return
@@ -2204,10 +2239,18 @@ function renderPoliceTable() {
             </button>
           `;
 
-          const canReupload = !isClosedTime && !c.closed;
+          const canReupload = isReturnedByCourt || (!isClosedTime && !c.closed);
+          const reuploadTitle = isReturnedByCourt
+            ? `ศาลส่งคืนคำร้อง: ${courtReturnReason || 'ให้อัพโหลดไฟล์ใหม่'} (อนุญาตให้อัพโหลดไฟล์ทับได้)`
+            : (isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : 'อัพโหลดไฟล์ใหม่ทับของเดิม');
+
+          const btnStyle = isReturnedByCourt
+            ? 'background-color: #d97706 !important; border-color: #d97706 !important; color: #ffffff !important; font-weight: 700;'
+            : (canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8 !important; border-color: #94a3b8 !important;');
+
           actionButtons += `
-            <button ${canReupload ? `onclick="openUploadModal('${c.caseNumber}')"` : 'disabled'} type="button" class="btn-police-upload-inline" style="${canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8 !important; border-color: #94a3b8 !important;'}" title="${isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : 'อัพโหลดไฟล์ใหม่ทับของเดิม'}">
-              <i class="fa-solid fa-upload"></i> อัพโหลดทับ
+            <button ${canReupload ? `onclick="openUploadModal('${c.caseNumber}')"` : 'disabled'} type="button" class="btn-police-upload-inline" style="${btnStyle}" title="${reuploadTitle}">
+              <i class="fa-solid fa-cloud-arrow-up"></i> ${isReturnedByCourt ? 'อัพโหลดทับ (ศาลส่งคืน)' : 'อัพโหลดทับ'}
             </button>
           `;
 
@@ -2219,13 +2262,17 @@ function renderPoliceTable() {
             `;
           }
         } else {
-          // File has NOT been uploaded yet -> Show red warning ONLY if time is closed
-          if (isClosedTime) {
+          // File has NOT been uploaded yet (or was cleared upon return)
+          const canUpload = isReturnedByCourt || !isClosedTime;
+          if (!canUpload) {
             actionButtons += `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 700; white-space: nowrap;"><i class="fa-solid fa-ban"></i> เลย 16.00 น. ยื่นที่ศาลด้วยตนเอง</span>`;
           } else {
+            const btnStyle = isReturnedByCourt
+              ? 'background-color: #d97706 !important; border-color: #d97706 !important; color: #ffffff !important; font-weight: 700;'
+              : '';
             actionButtons += `
-              <button onclick="openUploadModal('${c.caseNumber}')" type="button" class="btn-police-upload-inline" title="แนบไฟล์คำร้องฝากขัง">
-                <i class="fa-solid fa-upload"></i> อัพโหลด PDF
+              <button onclick="openUploadModal('${c.caseNumber}')" type="button" class="btn-police-upload-inline" style="${btnStyle}" title="${isReturnedByCourt ? `ศาลส่งคืน: ${courtReturnReason || 'ให้อัพโหลดใหม่'}` : 'แนบไฟล์คำร้องฝากขัง'}">
+                <i class="fa-solid fa-cloud-arrow-up"></i> ${isReturnedByCourt ? 'อัพโหลดใหม่ (ศาลส่งคืน)' : 'อัพโหลด PDF'}
               </button>
             `;
             if (!c.history || c.history.length === 0) {
@@ -2411,9 +2458,19 @@ function openUploadModal(caseNumber) {
     return;
   }
 
+  // ตรวจสอบว่ามีการส่งคืนจากศาลจริงหรือไม่
+  const isReturnedByCourt = Boolean(
+    (c.courtFlag && c.courtFlag.reason) || 
+    (c.courtReturn && c.courtReturn.reason) || 
+    (Array.isArray(c.history) && c.history.some(h => h.type === 'court_returned'))
+  );
+  const courtReturnReason = (c.courtFlag && c.courtFlag.reason) || (c.courtReturn && c.courtReturn.reason) || '';
+
   const now = new Date();
   const isPast = isPastCutoff(c.filingDeadline, now);
-  if (isPast) {
+
+  // หากไม่มีการส่งคืนจากศาล ให้ตรวจสอบเวลาตัดยื่น 16.00 น. ตามปกติ
+  if (!isReturnedByCourt && isPast) {
     Swal.fire({
       icon: 'warning',
       title: 'เลยกำหนดเวลายื่นคำร้อง',
@@ -2428,7 +2485,7 @@ function openUploadModal(caseNumber) {
   }
 
   const windowCheck = checkSubmissionWindow(now);
-  if (!windowCheck.isOpen) {
+  if (!isReturnedByCourt && !windowCheck.isOpen) {
     Swal.fire({
       icon: 'warning',
       title: 'นอกเวลาให้บริการยื่นคำร้อง',
@@ -2445,11 +2502,17 @@ function openUploadModal(caseNumber) {
 
   setElementValue('uploadCaseNumber', c.caseNumber);
   setElementText('uploadCaseNumberDisplay', `เลขคดี: ${c.caseNumber}`);
-  setElementText('uploadCaseInfoDisplay', `ครั้งที่ ${c.k} | สภ.: ${c.station || 'ไม่ระบุ'}`);
+
+  let infoDisplayHtml = `ครั้งที่ ${c.k} | สภ.: ${c.station || 'ไม่ระบุ'}`;
+  if (isReturnedByCourt) {
+    infoDisplayHtml += `<div style="margin-top: 0.4rem; padding: 0.5rem 0.75rem; background: #fffbeb; border: 1px solid #fde68a; border-radius: 6px; color: #92400e; font-size: 0.825rem;"><i class="fa-solid fa-rotate-left" style="color: #d97706;"></i> <b>ศาลส่งคืนให้แก้ไข:</b> ${courtReturnReason || 'กรุณาตรวจสอบและแนบไฟล์ฉบับถูกต้อง'}</div>`;
+  }
+  const infoEl = document.getElementById('uploadCaseInfoDisplay');
+  if (infoEl) infoEl.innerHTML = infoDisplayHtml;
 
   selectedFile = null;
   setElementValue('pdfFileInput', '');
-  setElementText('dropzoneText', 'คลิก หรือ ลากไฟล์ PDF มาวางที่นี่');
+  setElementText('dropzoneText', isReturnedByCourt ? 'คลิก หรือ ลากไฟล์ PDF ฉบับแก้ไขใหม่ มาวางที่นี่' : 'คลิก หรือ ลากไฟล์ PDF มาวางที่นี่');
 
   const statusDiv = document.getElementById('pdfValidationStatus');
   if (statusDiv) statusDiv.style.display = 'none';
@@ -2586,7 +2649,14 @@ function handleCreateRequest(event) {
   const isPast = targetCase ? isPastCutoff(targetCase.filingDeadline, now) : false;
   const windowCheck = checkSubmissionWindow(now);
 
-  if (isPast || targetCase.closed || !windowCheck.isOpen) {
+  // ตรวจสอบว่าคดีนี้ถูกส่งคืนจากศาลจริงหรือไม่
+  const isReturnedByCourt = Boolean(
+    (targetCase.courtFlag && targetCase.courtFlag.reason) || 
+    (targetCase.courtReturn && targetCase.courtReturn.reason) || 
+    (Array.isArray(targetCase.history) && targetCase.history.some(h => h.type === 'court_returned'))
+  );
+
+  if (targetCase.closed || (!isReturnedByCourt && (isPast || !windowCheck.isOpen))) {
     closeModal('addRequestModal');
     let errTitle = 'ไม่สามารถอัพโหลดไฟล์ได้';
     let errMsg = 'ขณะนี้เลยเวลา 16.00 น. หรือปิดรับยื่นคำร้องออนไลน์แล้ว กรุณานำเอกสารยื่นต่อศาลด้วยตนเอง';
@@ -2622,7 +2692,7 @@ function handleCreateRequest(event) {
     reader.onload = function(e) {
       const base64Data = e.target.result;
       
-      fetch(scriptUrl, {
+      fetch(`${scriptUrl}?key=${EREDT_API_KEY}`, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain' },
         body: JSON.stringify({
@@ -4219,7 +4289,9 @@ async function fetchLiveGoogleSheetData(options = {}) {
   async function safeFetchCsv(url) {
     try {
       // Use redirect: 'error' to prevent browser from following 302 login redirects to accounts.google.com
-      const res = await fetch(url, { method: 'GET', mode: 'cors', redirect: 'error' });
+      const separator = url.includes('?') ? '&' : '?';
+      const cacheBustUrl = `${url}${separator}_t=${Date.now()}`;
+      const res = await fetch(cacheBustUrl, { method: 'GET', mode: 'cors', cache: 'no-store', redirect: 'error' });
       if (!res.ok) return null;
       const txt = await res.text();
       if (!txt || txt.includes('<!DOCTYPE html>') || txt.includes('<html') || txt.includes('accounts.google.com')) {
@@ -4233,7 +4305,7 @@ async function fetchLiveGoogleSheetData(options = {}) {
 
   async function safeFetchJson(url) {
     try {
-      const res = await fetch(url, { method: 'GET', mode: 'cors' });
+      const res = await fetch(url, { method: 'GET', mode: 'cors', cache: 'no-store' });
       if (!res.ok) return null;
       if (res.redirected && res.url.includes('accounts.google.com')) return null;
       return await res.json();
@@ -4255,13 +4327,13 @@ async function fetchLiveGoogleSheetData(options = {}) {
     // 1. Primary: Fetch via Apps Script WebApp if scriptUrl configured
     if (scriptUrl && scriptUrl.trim() !== '') {
       updateProgress(35, 'กำลังโหลดข้อมูลคดี...');
-      requestsData = await safeFetchJson(`${scriptUrl}?action=getRequests`);
+      requestsData = await safeFetchJson(`${scriptUrl}?key=${EREDT_API_KEY}&action=getRequests&_t=${Date.now()}`);
 
       updateProgress(65, 'กำลังโหลดข้อมูลผู้ใช้งาน...');
-      usersData = await safeFetchJson(`${scriptUrl}?action=getUsers`);
+      usersData = await safeFetchJson(`${scriptUrl}?key=${EREDT_API_KEY}&action=getUsers&_t=${Date.now()}`);
 
       updateProgress(85, 'กำลังโหลดข้อมูลวันหยุด...');
-      holidaysData = await safeFetchJson(`${scriptUrl}?action=getHolidays`);
+      holidaysData = await safeFetchJson(`${scriptUrl}?key=${EREDT_API_KEY}&action=getHolidays&_t=${Date.now()}`);
     }
 
     // 2. CSV API Fallback (Public CSV Endpoint)
@@ -4599,22 +4671,33 @@ function openMobileCaseActionModal(caseNumber) {
       }
     }
     if (enriched.officer === currentUser.username && !enriched.closed) {
+      const isReturnedByCourt = Boolean(
+        (enriched.courtFlag && enriched.courtFlag.reason) || 
+        (enriched.courtReturn && enriched.courtReturn.reason) || 
+        (Array.isArray(enriched.history) && enriched.history.some(h => h.type === 'court_returned'))
+      );
+      const courtReturnReason = (enriched.courtFlag && enriched.courtFlag.reason) || (enriched.courtReturn && enriched.courtReturn.reason) || '';
+
       const isPast = isPastCutoff(enriched.filingDeadline);
-      const isClosedTime = isPast;
+      const isClosedTime = !isReturnedByCourt && isPast;
 
       if (enriched.fileName) {
         // 1. Preview PDF button
         actionButtonsHtml += `
           <button onclick="Swal.close(); previewPdfFile('${enriched.caseNumber}', event);" type="button" class="btn-secondary" style="width: 100%; background-color: #0284c7; border-color: #0284c7; color: #fff; margin-bottom: 0.5rem;">
-            <i class="fa-solid fa-file-pdf"></i> Preview file PDF (${enriched.fileName})
+            <i class="fa-solid fa-file-pdf"></i> ดูตัวอย่างไฟล์ PDF (${enriched.fileName})
           </button>
         `;
 
-        // 2. Re-upload button (allowed if not past cutoff)
-        const canReupload = !isClosedTime && !enriched.closed;
+        // 2. Re-upload button (allowed if not past cutoff OR if returned by court)
+        const canReupload = isReturnedByCourt || (!isClosedTime && !enriched.closed);
+        const reuploadBtnStyle = isReturnedByCourt 
+          ? 'background-color: #d97706 !important; border-color: #d97706 !important; color: #fff !important; font-weight: 700;'
+          : (canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8;');
+        
         actionButtonsHtml += `
-          <button ${canReupload ? `onclick="Swal.close(); openUploadModal('${enriched.caseNumber}');"` : 'disabled'} type="button" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem; ${canReupload ? '' : 'opacity: 0.55; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8;'}" title="${isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : 'อัพโหลดไฟล์ใหม่ทับของเดิม'}">
-            <i class="fa-solid fa-upload"></i> อัพโหลดไฟล์ใหม่ทับ
+          <button ${canReupload ? `onclick="Swal.close(); openUploadModal('${enriched.caseNumber}');"` : 'disabled'} type="button" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem; ${reuploadBtnStyle}" title="${isReturnedByCourt ? `ศาลส่งคืน: ${courtReturnReason} (อนุญาตให้อัพโหลดไฟล์ทับได้)` : (isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : 'อัพโหลดไฟล์ใหม่ทับของเดิม')}">
+            <i class="fa-solid fa-cloud-arrow-up"></i> ${isReturnedByCourt ? 'อัพโหลดไฟล์ทับ (ศาลส่งคืน)' : 'อัพโหลดไฟล์ใหม่ทับ'}
           </button>
         `;
 
@@ -4627,17 +4710,21 @@ function openMobileCaseActionModal(caseNumber) {
           `;
         }
       } else {
-        // File has NOT been uploaded yet (!enriched.fileName)
-        if (isClosedTime) {
+        // File has NOT been uploaded yet (or was cleared upon return)
+        const canUpload = isReturnedByCourt || !isClosedTime;
+        if (!canUpload) {
           actionButtonsHtml += `
             <div style="font-size: 0.85rem; color: #dc2626; text-align: center; font-weight: 700; padding: 0.65rem; background: #fee2e2; border-radius: 0.375rem; border: 1px solid #fca5a5; margin-bottom: 0.5rem;">
               <i class="fa-solid fa-ban"></i> เลย 16.00 น. ยื่นที่ศาลด้วยตนเอง
             </div>
           `;
         } else {
+          const uploadBtnStyle = isReturnedByCourt 
+            ? 'background-color: #d97706 !important; border-color: #d97706 !important; color: #fff !important; font-weight: 700;'
+            : '';
           actionButtonsHtml += `
-            <button onclick="Swal.close(); openUploadModal('${enriched.caseNumber}');" type="button" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem;">
-              <i class="fa-solid fa-upload"></i> อัพโหลด PDF
+            <button onclick="Swal.close(); openUploadModal('${enriched.caseNumber}');" type="button" class="btn-primary" style="width: 100%; margin-bottom: 0.5rem; ${uploadBtnStyle}" title="${isReturnedByCourt ? `ศาลส่งคืน: ${courtReturnReason}` : 'อัพโหลด PDF'}">
+              <i class="fa-solid fa-cloud-arrow-up"></i> ${isReturnedByCourt ? 'อัพโหลด PDF ใหม่ (ศาลส่งคืน)' : 'อัพโหลด PDF'}
             </button>
           `;
           if (!enriched.history || enriched.history.length === 0) {
