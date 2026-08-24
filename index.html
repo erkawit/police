@@ -238,6 +238,10 @@
               <p id="policeStationSub">สังกัด: สภ.เมืองอุดรธานี</p>
             </div>
             <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button id="btnClearPoliceRequests" onclick="handleAdminClearCasesData()" type="button" class="btn-danger btn-admin-clear-data" style="width: auto; background: linear-gradient(135deg, #dc2626, #b91c1c); border: 1px solid #b91c1c; color: #ffffff !important; font-size: 0.85rem; padding: 0.45rem 0.95rem; display: none; align-items: center; gap: 0.45rem; font-weight: 600; border-radius: 0.5rem; box-shadow: 0 2px 6px rgba(220, 38, 38, 0.25); cursor: pointer;" title="ล้างข้อมูลรายการยื่นคำร้องทั้งหมด (เฉพาะผู้ดูแลระบบ ในช่วงทดสอบ 7 วัน)">
+                <i class="fa-solid fa-trash-can"></i> <span>เคลียร์ข้อมูลคำร้อง</span>
+                <span class="badge trial-days-badge" style="background: rgba(255,255,255,0.25); color: #ffffff; font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 999px; font-weight: 700;">ทดสอบ 7 วัน</span>
+              </button>
               <button onclick="fetchLiveGoogleSheetData({ isManual: true })" class="btn-secondary" style="width: auto;">
                 <i class="fa-solid fa-arrows-rotate"></i> ซิงค์ข้อมูลล่าสุด
               </button>

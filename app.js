@@ -1436,6 +1436,11 @@ function renderAppLayout() {
   // Sync Button visible for all court officers
   setElementDisplay('btnSyncGoogleSheet', isCourt ? 'inline-flex' : 'none');
 
+  // Update visibility of 7-day trial admin clear data buttons
+  if (typeof updateClearDataButtonsVisibility === 'function') {
+    updateClearDataButtonsVisibility();
+  }
+
   // Start background auto-sync timer
   startAutoSyncTimer();
   // Check if cache TTL has expired
@@ -2148,6 +2153,9 @@ window.openMobileStationInbox = openMobileStationInbox;
 
 function renderPoliceView() {
   if (!currentUser) return;
+  if (typeof updateClearDataButtonsVisibility === 'function') {
+    updateClearDataButtonsVisibility();
+  }
   startLiveClock();
   setElementText('policeStationSub', `สังกัด: ${currentUser.station || 'ไม่ระบุ'}`);
 
@@ -3312,6 +3320,119 @@ function checkCaseDuplicate(newType, newNum, newYear, existingCases) {
 }
 window.checkCaseDuplicate = checkCaseDuplicate;
 
+/**
+ * คำนวณเลขลำดับสูงสุดของเลขฝากขังแต่ละประเภทในปี พ.ศ. ที่ระบุ
+ */
+function getLatestCaseNumbersByYear(targetYear, requests = getRequests()) {
+  const curYear = new Date().getFullYear();
+  const beYear = curYear < 2400 ? curYear + 543 : curYear;
+  const normYear = String(targetYear || beYear).trim();
+  let maxF = 0;   // สำหรับ ฝ. (คดีทั่วไป)
+  let maxYF = 0;  // สำหรับ ยฝ. (คดียาเสพติด)
+
+  for (const c of requests) {
+    if (!c || !c.caseNumber) continue;
+    const parsed = parseCaseComponents(c.caseNumber);
+    if (!parsed || isNaN(parsed.num)) continue;
+
+    const caseYear = parsed.year ? String(parsed.year).trim() : (c.createdAt ? (new Date(c.createdAt).getFullYear() + 543).toString() : normYear);
+    if (caseYear === normYear) {
+      const type = parsed.type || c.type;
+      if (type === 'ฝ' || type === 'ฝ.') {
+        if (parsed.num > maxF) maxF = parsed.num;
+      } else if (type === 'ยฝ' || type === 'ยฝ.') {
+        if (parsed.num > maxYF) maxYF = parsed.num;
+      }
+    }
+  }
+
+  return {
+    year: normYear,
+    maxF: maxF,
+    maxYF: maxYF,
+    nextF: maxF + 1,
+    nextYF: maxYF + 1
+  };
+}
+window.getLatestCaseNumbersByYear = getLatestCaseNumbersByYear;
+
+/**
+ * อัพเดตสถานะเลขล่าสุดและใส่เลขถัดไปให้อัตโนมัติ (โดยไม่ disable ให้แก้ไขเป็นเลขอื่นได้)
+ */
+function updateBatchAutoSequence(context = 'inline') {
+  const isModal = context === 'modal';
+  const prefix = isModal ? 'modal' : 'inline';
+  
+  let typeSelect, yearInput, startNumInput, endNumInput;
+  if (isModal) {
+    const modal = document.getElementById('createBatchModal');
+    if (modal) {
+      typeSelect = modal.querySelector('#batchTypeSelect');
+      yearInput = modal.querySelector('#batchYearInput');
+      startNumInput = modal.querySelector('#batchStartNumInput');
+      endNumInput = modal.querySelector('#batchEndNumInput');
+    }
+  } else {
+    const inlineContainer = document.getElementById('createBatchView');
+    if (inlineContainer) {
+      typeSelect = inlineContainer.querySelector('#batchTypeSelect');
+      yearInput = inlineContainer.querySelector('#batchYearInput');
+      startNumInput = inlineContainer.querySelector('#batchStartNumInput');
+      endNumInput = inlineContainer.querySelector('#batchEndNumInput');
+    }
+  }
+
+  const curYear = new Date().getFullYear();
+  const beYear = curYear < 2400 ? curYear + 543 : curYear;
+  const targetYear = (yearInput && yearInput.value) ? yearInput.value.trim() : beYear.toString();
+
+  const latest = getLatestCaseNumbersByYear(targetYear);
+
+  // อัพเดตข้อความใน Status Banner
+  const yearSpan = document.getElementById(`${prefix}SeqYear`);
+  if (yearSpan) yearSpan.textContent = latest.year;
+
+  const fLatestSpan = document.getElementById(`${prefix}SeqLatestF`);
+  if (fLatestSpan) {
+    fLatestSpan.textContent = latest.maxF > 0 ? `ฝ.${latest.maxF}/${latest.year}` : 'ยังไม่มีเลข (เริ่มที่ 1)';
+  }
+
+  const yfLatestSpan = document.getElementById(`${prefix}SeqLatestYF`);
+  if (yfLatestSpan) {
+    yfLatestSpan.textContent = latest.maxYF > 0 ? `ยฝ.${latest.maxYF}/${latest.year}` : 'ยังไม่มีเลข (เริ่มที่ 1)';
+  }
+
+  const fNextBadge = document.getElementById(`${prefix}SeqNextFBadge`);
+  if (fNextBadge) {
+    fNextBadge.textContent = isModal ? `(ถัดไป: ${latest.nextF})` : `ถัดไป: ${latest.nextF}`;
+  }
+
+  const yfNextBadge = document.getElementById(`${prefix}SeqNextYFBadge`);
+  if (yfNextBadge) {
+    yfNextBadge.textContent = isModal ? `(ถัดไป: ${latest.nextYF})` : `ถัดไป: ${latest.nextYF}`;
+  }
+
+  // กำหนดค่าเริ่มต้นเป็นเลขถัดไปโดยอัตโนมัติ (แต่ไม่ disabled ผู้ใช้สามารถเปลี่ยนได้)
+  const selectedType = typeSelect ? typeSelect.value : 'ยฝ.';
+  const isDrugType = (selectedType === 'ยฝ.' || selectedType === 'ยฝ');
+  const nextNum = isDrugType ? latest.nextYF : latest.nextF;
+
+  if (startNumInput) {
+    startNumInput.value = nextNum;
+    startNumInput.placeholder = `แนะนำ: ${nextNum}`;
+  }
+  if (endNumInput) {
+    endNumInput.value = nextNum;
+    endNumInput.placeholder = `แนะนำ: ${nextNum}`;
+  }
+}
+window.updateBatchAutoSequence = updateBatchAutoSequence;
+
+function onBatchFormTypeOrYearChange(context = 'inline') {
+  updateBatchAutoSequence(context);
+}
+window.onBatchFormTypeOrYearChange = onBatchFormTypeOrYearChange;
+
 function handleCreateBatch(event) {
   event.preventDefault();
   const form = event.target;
@@ -3413,6 +3534,226 @@ function handleCreateBatch(event) {
   if (currentActiveView === 'dashboard') renderDashboard();
   else renderCourtView();
 }
+
+// ==========================================================================
+// ADMIN CLEAR DATA TRIAL FEATURE (7-DAY TESTING WINDOW)
+// ==========================================================================
+// กำหนดระยะเวลาทดสอบปุ่มเคลียร์ข้อมูล 7 วัน (24 ส.ค. 2569 - 31 ส.ค. 2569 เวลา 23:59:59 น.)
+const CLEAR_DATA_TEST_EXPIRY_MS = new Date('2026-08-31T23:59:59+07:00').getTime();
+
+function isClearDataTrialActive() {
+  return Date.now() <= CLEAR_DATA_TEST_EXPIRY_MS;
+}
+
+function getClearDataRemainingDays() {
+  const diff = CLEAR_DATA_TEST_EXPIRY_MS - Date.now();
+  if (diff <= 0) return 0;
+  return Math.ceil(diff / (1000 * 60 * 60 * 24));
+}
+
+function updateClearDataButtonsVisibility() {
+  const isAdmin = currentUser && (currentUser.role === 'admin' || currentUser.role === 'officer');
+  const isTrialActive = isClearDataTrialActive();
+  const showBtn = Boolean(isAdmin && isTrialActive);
+  const remainingDays = getClearDataRemainingDays();
+
+  const clearBtns = document.querySelectorAll('.btn-admin-clear-data');
+  clearBtns.forEach(btn => {
+    if (showBtn) {
+      btn.style.display = 'inline-flex';
+      btn.title = `ล้างข้อมูลเลขฝากขัง/คำร้องทั้งหมด (เฉพาะผู้ดูแลระบบ ในช่วงทดสอบ เหลืออีก ${remainingDays} วัน)`;
+      const badge = btn.querySelector('.trial-days-badge');
+      if (badge) {
+        badge.textContent = `ทดสอบ ${remainingDays} วัน`;
+      }
+    } else {
+      btn.style.display = 'none';
+    }
+  });
+}
+window.updateClearDataButtonsVisibility = updateClearDataButtonsVisibility;
+window.isClearDataTrialActive = isClearDataTrialActive;
+window.getClearDataRemainingDays = getClearDataRemainingDays;
+
+async function handleAdminClearCasesData() {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'officer')) {
+    Swal.fire({
+      icon: 'error',
+      title: 'ไม่มีสิทธิ์ดำเนินการ',
+      text: 'ฟังก์ชันนี้อนุญาตให้เฉพาะผู้ดูแลระบบ (Admin) เท่านั้น'
+    });
+    return;
+  }
+
+  if (!isClearDataTrialActive()) {
+    Swal.fire({
+      icon: 'info',
+      title: 'หมดระยะเวลาทดสอบแล้ว',
+      text: 'ฟังก์ชันเคลียร์ข้อมูลสิ้นสุดระยะเวลาทดสอบ 7 วันแล้ว และถูกปิดการใช้งานถาวร'
+    });
+    updateClearDataButtonsVisibility();
+    return;
+  }
+
+  const currentRequests = getRequests();
+  const reqCount = currentRequests.length;
+  const remainingDays = getClearDataRemainingDays();
+
+  let downloadHistoryCount = 0;
+  try {
+    const rawDl = localStorage.getItem('eredt_download_history');
+    if (rawDl) downloadHistoryCount = JSON.parse(rawDl).length;
+  } catch (e) {}
+
+  let returnHistoryCount = 0;
+  try {
+    const rawRet = localStorage.getItem('eredt_return_history');
+    if (rawRet) returnHistoryCount = JSON.parse(rawRet).length;
+  } catch (e) {}
+
+  // ขั้นตอนที่ 1: แจ้งเตือนและอธิบายผลกระทบอย่างละเอียด
+  const impactHtml = `
+    <div style="text-align: left; font-size: 0.875rem; line-height: 1.6; color: #334155;">
+      <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 0.85rem; margin-bottom: 1rem; color: #991b1b;">
+        <div style="font-weight: 700; font-size: 0.95rem; margin-bottom: 0.35rem; display: flex; align-items: center; gap: 0.4rem;">
+          <i class="fa-solid fa-triangle-exclamation" style="color: #dc2626; font-size: 1.1rem;"></i>
+          <span>คำเตือนสำคัญ: โปรดตรวจสอบผลกระทบก่อนดำเนินการ</span>
+        </div>
+        <div style="font-size: 0.825rem;">การล้างข้อมูลนี้เป็นการดำเนินการระดับระบบ <b>ไม่สามารถย้อนกลับหรือกู้คืนข้อมูลได้</b> หากไม่มีการสำรองข้อมูลไว้ล่วงหน้า</div>
+      </div>
+
+      <div style="font-weight: 700; color: #0f172a; margin-bottom: 0.5rem;">
+        <i class="fa-solid fa-list-check" style="color: #2563eb;"></i> รายละเอียดผลกระทบที่จะเกิดขึ้น:
+      </div>
+
+      <ul style="padding-left: 1.25rem; margin-bottom: 1rem; color: #475569; font-size: 0.85rem;">
+        <li style="margin-bottom: 0.45rem;">
+          <b style="color: #dc2626;">1. ข้อมูลคำร้องและเลขฝากขังทั้งหมด (${reqCount} รายการ):</b> ข้อมูลสำนวนคดีทั้งหมดในระบบ (ทั้งที่ยื่นแล้ว, รออัพโหลด, หรือส่งคืน) จะถูกล้างออกถาวร
+        </li>
+        <li style="margin-bottom: 0.45rem;">
+          <b style="color: #dc2626;">2. ประวัติการดาวน์โหลดและประวัติส่งคืน:</b> ข้อมูลประวัติดาวน์โหลด (${downloadHistoryCount} รายการ) และประวัติส่งคืนคำร้อง (${returnHistoryCount} รายการ) จะถูกลบทั้งหมด
+        </li>
+        <li style="margin-bottom: 0.45rem;">
+          <b style="color: #d97706;">3. พนักงานสอบสวนทั้ง 23 สถานีตำรวจ:</b> รายการสำนวนคดีในกล่องข้อความสถานีและรายการที่พนักงานรับผิดชอบจะหายไปทั้งหมด
+        </li>
+        <li style="margin-bottom: 0.45rem;">
+          <b style="color: #0284c7;">4. การซิงค์ Google Apps Script / Google Sheet:</b> ระบบจะส่งคำสั่งล้างข้อมูลไปยัง Cloud เพื่อให้ฐานข้อมูลเป็นปัจจุบัน
+        </li>
+      </ul>
+
+      <div style="background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 0.75rem; color: #1e40af; font-size: 0.825rem; margin-bottom: 0.75rem;">
+        <i class="fa-solid fa-shield-halved"></i> <b>คำแนะนำเพื่อความปลอดภัย:</b> กรุณาตรวจสอบให้แน่ใจว่าไม่มีคดีสำคัญที่อยู่ระหว่างดำเนินการ หรือได้ทำการส่งออก/สำรองข้อมูลไว้เรียบร้อยแล้ว
+      </div>
+
+      <div style="font-size: 0.775rem; color: #64748b; text-align: right;">
+        <i class="fa-solid fa-clock"></i> ฟังก์ชันช่วงทดสอบ (เหลือระยะเวลาอีก ${remainingDays} วัน)
+      </div>
+    </div>
+  `;
+
+  const result1 = await Swal.fire({
+    title: '<span style="color: #dc2626; font-weight: 700;"><i class="fa-solid fa-trash-can"></i> ยืนยันการเคลียร์ข้อมูลคำร้องและเลขฝากขัง</span>',
+    html: impactHtml,
+    icon: 'warning',
+    showCancelButton: true,
+    confirmButtonText: 'รับทราบผลกระทบและดำเนินการต่อ',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#dc2626',
+    cancelButtonColor: '#64748b',
+    width: '620px',
+    focusCancel: true
+  });
+
+  if (!result1.isConfirmed) return;
+
+  // ขั้นตอนที่ 2: ให้พิมพ์คำยืนยัน เพื่อป้องกันการกดพลาดโดยไม่ได้ตั้งใจ
+  const result2 = await Swal.fire({
+    title: 'ยืนยันขั้นสุดท้าย',
+    html: `
+      <div style="text-align: left; font-size: 0.875rem; color: #334155; margin-bottom: 0.75rem;">
+        เพื่อความปลอดภัยสูงสุด กรุณาพิมพ์คำว่า <b style="color: #dc2626; background: #fee2e2; padding: 0.1rem 0.4rem; border-radius: 4px;">ยืนยันล้างข้อมูล</b> ในช่องด้านล่างเพื่อยืนยัน:
+      </div>
+    `,
+    input: 'text',
+    inputPlaceholder: 'พิมพ์คำว่า ยืนยันล้างข้อมูล',
+    icon: 'error',
+    showCancelButton: true,
+    confirmButtonText: 'ล้างข้อมูลทั้งหมดทันที',
+    cancelButtonText: 'ยกเลิก',
+    confirmButtonColor: '#dc2626',
+    cancelButtonColor: '#64748b',
+    inputValidator: (value) => {
+      if (!value || value.trim() !== 'ยืนยันล้างข้อมูล') {
+        return 'กรุณาพิมพ์คำว่า "ยืนยันล้างข้อมูล" ให้ถูกต้องเพื่อดำเนินการ';
+      }
+    }
+  });
+
+  if (!result2.isConfirmed) return;
+
+  // ขั้นตอนที่ 3: ดำเนินการล้างข้อมูล
+  Swal.fire({
+    title: 'กำลังล้างข้อมูลในระบบ...',
+    allowOutsideClick: false,
+    didOpen: () => Swal.showLoading()
+  });
+
+  try {
+    // 1. ล้างข้อมูล requests ใน LocalStorage และ In-Memory
+    saveRequests([]);
+    
+    // 2. ล้างประวัติการดาวน์โหลด และประวัติส่งคืน
+    try {
+      localStorage.setItem('eredt_download_history', JSON.stringify([]));
+    } catch (e) {}
+    try {
+      localStorage.setItem('eredt_return_history', JSON.stringify([]));
+    } catch (e) {}
+
+    // 3. ส่งสัญญาณ Real-time Bus ไปยังแท็บอื่น
+    try {
+      broadcastChange({
+        type: 'DATA_SYNC',
+        payload: { requests: [], clearedBy: currentUser.username, clearedAt: new Date().toISOString() }
+      });
+    } catch (e) {}
+
+    // 4. ซิงค์ไปยัง Google Apps Script / Google Sheet หากมีการเชื่อมต่อ
+    const scriptUrl = localStorage.getItem('eredt_google_script');
+    if (scriptUrl) {
+      try {
+        await saveRequestsToGoogle([]);
+      } catch (err) {
+        console.warn('Sync cleared data to Google Script warning:', err);
+      }
+    }
+
+    // 5. อัพเดตการแสดงผลหน้าจอ
+    if (typeof renderPoliceView === 'function') renderPoliceView();
+    if (typeof renderDashboard === 'function') renderDashboard();
+    if (typeof renderCalendar === 'function') renderCalendar();
+
+    Swal.fire({
+      icon: 'success',
+      title: 'เคลียร์ข้อมูลสำเร็จ',
+      html: `
+        <div style="font-size: 0.9rem; color: #334155; line-height: 1.6;">
+          ล้างข้อมูลเลขฝากขังและรายการยื่นคำร้องทั้งหมด (${reqCount} รายการ) เรียบร้อยแล้ว<br>
+          <span style="font-size: 0.8rem; color: #64748b;">ระบบพร้อมสำหรับการสร้างเลขฝากขังและรับคำร้องชุดใหม่</span>
+        </div>
+      `,
+      confirmButtonColor: '#1e3a8a'
+    });
+  } catch (error) {
+    console.error('Error clearing cases data:', error);
+    Swal.fire({
+      icon: 'error',
+      title: 'เกิดข้อผิดพลาดในการล้างข้อมูล',
+      text: error.message || 'ไม่สามารถล้างข้อมูลได้ กรุณาลองใหม่อีกครั้ง'
+    });
+  }
+}
+window.handleAdminClearCasesData = handleAdminClearCasesData;
 
 function openReceiveModal(caseNumber) {
   const requests = getRequests();
