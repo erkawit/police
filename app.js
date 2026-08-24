@@ -839,9 +839,10 @@ function syncToGoogleSheet(actionName, payload) {
   try {
     fetch(`${scriptUrl}?key=${EREDT_API_KEY}`, {
       method: 'POST',
-      mode: 'no-cors',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({ action: actionName, ...payload })
+    }).then(() => {
+      localStorage.setItem('eredt_last_sync', Date.now().toString());
     }).catch(err => {
       console.warn('Google Sheet Sync warning:', err);
     });
@@ -849,6 +850,27 @@ function syncToGoogleSheet(actionName, payload) {
     console.warn('Google Sheet Sync error:', e);
   }
 }
+window.syncToGoogleSheet = syncToGoogleSheet;
+
+async function saveRequestsToGoogle(requests) {
+  const scriptUrl = localStorage.getItem('eredt_google_script');
+  if (!scriptUrl) return { success: false, reason: 'No scriptUrl configured' };
+
+  try {
+    const res = await fetch(`${scriptUrl}?key=${EREDT_API_KEY}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ action: 'saveRequests', requests: requests || [] })
+    });
+    const data = await res.json();
+    localStorage.setItem('eredt_last_sync', Date.now().toString());
+    return data;
+  } catch (err) {
+    console.warn('saveRequestsToGoogle error:', err);
+    return { success: false, error: err };
+  }
+}
+window.saveRequestsToGoogle = saveRequestsToGoogle;
 
 // --------------------------------------------------------------------------
 // REALTIME MESSAGE BUS (HTML5 BroadcastChannel + Storage Event Fallback)
@@ -2441,8 +2463,35 @@ function claimForMe(caseNumber, event) {
   const index = requests.findIndex(r => r.caseNumber === caseNumber);
   if (index !== -1) {
     requests[index].officer = currentUser.username;
+    
+    // บันทึกประวัติการรับสำนวนเข้าของพนักงานสอบสวน
+    const history = requests[index].history ? [...requests[index].history] : [];
+    history.push({
+      type: 'claim',
+      title: 'พนักงานสอบสวนกดรับเป็นเจ้าของคดี',
+      by: currentUser.name || currentUser.username,
+      timestamp: toISO(new Date())
+    });
+    requests[index].history = history;
+
+    // บันทึกลง LocalStorage
     saveRequests(requests);
-    Swal.fire({ icon: 'success', title: 'รับเป็นเจ้าของคดีเรียบร้อย', timer: 1200, showConfirmButton: false });
+
+    // ซิงค์ตรงไปยัง Google Apps Script / Google Sheet ทันที
+    syncToGoogleSheet('claimCase', {
+      caseNumber: caseNumber,
+      officer: currentUser.username,
+      station: requests[index].station || currentUser.station || '',
+      history: history
+    });
+
+    Swal.fire({
+      icon: 'success',
+      title: 'รับเป็นเจ้าของคดีเรียบร้อย',
+      text: `เลขคดี ${caseNumber} ถูกบันทึกเข้าสู่สำนวนของคุณและซิงค์ Google Sheet แล้ว`,
+      timer: 1500,
+      showConfirmButton: false
+    });
     renderPoliceView();
   }
 }
@@ -2673,11 +2722,23 @@ function handleCreateRequest(event) {
   const caseNumber = document.getElementById('uploadCaseNumber').value;
   if (!selectedFile) return;
 
+  const submitBtn = document.getElementById('submitRequestBtn');
+  if (submitBtn) {
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> กำลังอัพโหลด...';
+  }
+
   const requests = getRequests();
   const holidays = getHolidays();
   const index = requests.findIndex(r => r.caseNumber === caseNumber);
 
-  if (index === -1) return;
+  if (index === -1) {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> ยืนยันอัพโหลด';
+    }
+    return;
+  }
 
   const targetCase = requests[index];
   const now = new Date();
@@ -2692,6 +2753,10 @@ function handleCreateRequest(event) {
   );
 
   if (targetCase.closed || (!isReturnedByCourt && (isPast || !windowCheck.isOpen))) {
+    if (submitBtn) {
+      submitBtn.disabled = false;
+      submitBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> ยืนยันอัพโหลด';
+    }
     closeModal('addRequestModal');
     let errTitle = 'ไม่สามารถอัพโหลดไฟล์ได้';
     let errMsg = 'ปิดรับการส่งไฟล์สำหรับวันนี้ กรุณานำเอกสารยื่นต่อศาลด้วยตนเอง';
@@ -2716,55 +2781,92 @@ function handleCreateRequest(event) {
   const scriptUrl = localStorage.getItem('eredt_google_script');
   const driveFolderId = localStorage.getItem('eredt_drive_folder') || DEFAULT_DRIVE_FOLDER_ID;
 
+  // SweetAlert กำลังอัพโหลด - ล็อคป้องกันการกดออกระหว่างดำเนินการ และป้องกันการปั้มไฟล์
   Swal.fire({
     title: 'กำลังอัพโหลดคำร้องไป Google Drive...',
-    text: `กำลังจัดเก็บไฟล์เข้าระบบและสร้าง/ค้นหาโฟลเดอร์สำหรับ ${targetCase.station || (currentUser ? currentUser.station : null) || 'สภ.เมืองอุดรธานี'}`,
+    html: `
+      <div style="font-size: 0.875rem; color: #475569; line-height: 1.6; margin-top: 0.5rem;">
+        กำลังจัดเก็บไฟล์เข้าระบบและสร้างโฟลเดอร์สำหรับ <b>${targetCase.station || (currentUser ? currentUser.station : null) || 'สภ.เมืองอุดรธานี'}</b><br>
+        <span style="font-size: 0.775rem; color: #94a3b8;">ระบบกำลังประมวลผล ห้ามปิดหน้าต่างนี้</span>
+      </div>
+    `,
     allowOutsideClick: false,
+    allowEscapeKey: false,
+    showConfirmButton: false,
     didOpen: () => Swal.showLoading()
   });
 
   if (scriptUrl && rawSelectedFileObject) {
     const reader = new FileReader();
-    reader.onload = function(e) {
+    reader.onload = async function(e) {
       const base64Data = e.target.result;
       
-      fetch(`${scriptUrl}?key=${EREDT_API_KEY}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({
-          action: 'uploadFile',
-          fileName: selectedFile.name,
-          fileData: base64Data,
-          station: targetCase.station || (currentUser ? currentUser.station : null) || 'ทั่วไป',
-          driveFolderId: driveFolderId
-        })
-      })
-      .then(res => res.json())
-      .then(resData => {
+      try {
+        const res = await fetch(`${scriptUrl}?key=${EREDT_API_KEY}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          body: JSON.stringify({
+            action: 'uploadFile',
+            caseNumber: targetCase.caseNumber,
+            fileName: selectedFile.name,
+            fileData: base64Data,
+            station: targetCase.station || (currentUser ? currentUser.station : null) || 'ทั่วไป',
+            officer: currentUser ? (currentUser.name || currentUser.username) : targetCase.officer,
+            driveFolderId: driveFolderId
+          })
+        });
+        const resData = await res.json();
         if (resData && resData.fileUrl) {
           selectedFile.fileUrl = resData.fileUrl;
         }
-        finishUploadProcess();
-      })
-      .catch(err => {
+      } catch (err) {
         console.warn('Google Drive direct upload warning, proceeding locally:', err);
-        finishUploadProcess();
-      });
+      }
+      
+      await finishUploadProcess();
     };
     reader.readAsDataURL(rawSelectedFileObject);
   } else {
     finishUploadProcess();
   }
 
-  function finishUploadProcess() {
+  async function finishUploadProcess() {
     const result = uploadFile(requests[index], selectedFile, holidays);
     if (result.ok) {
       requests[index] = result.case;
       saveRequests(requests);
+      
+      // Await saving full updated table to Google Sheet in background
+      try {
+        await saveRequestsToGoogle(requests);
+      } catch (errSync) {
+        console.warn('Sync to Google Sheet warning:', errSync);
+      }
+
       closeModal('addRequestModal');
-      Swal.fire({ icon: 'success', title: 'อัพโหลดคำร้องเรียบร้อย', text: 'จัดเก็บไฟล์เข้า Google Drive และซิงค์ตาราง Google Sheet เรียบร้อยแล้ว', timer: 1800, showConfirmButton: false });
       renderPoliceView();
+
+      // หน่วงเวลา 2 วินาทีในพื้นหลังอย่างนุ่มนวล พร้อมแสดง progress bar ความสำเร็จ
+      Swal.fire({
+        icon: 'success',
+        title: 'อัพโหลดคำร้องเรียบร้อย',
+        html: `
+          <div style="font-size: 0.875rem; color: #334155; line-height: 1.6;">
+            จัดเก็บไฟล์เข้า Google Drive และบันทึกข้อมูลเรียบร้อยแล้ว<br>
+            <span style="font-size: 0.8rem; color: #059669; font-weight: 600;"><i class="fa-solid fa-circle-check"></i> เลขคดี: ${targetCase.caseNumber} (ครั้งที่ ${result.case.k})</span>
+          </div>
+        `,
+        timer: 2000,
+        timerProgressBar: true,
+        allowOutsideClick: false,
+        allowEscapeKey: false,
+        showConfirmButton: false
+      });
     } else {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> ยืนยันอัพโหลด';
+      }
       Swal.fire({ icon: 'error', title: 'ไม่อนุญาตให้อัพโหลด', text: result.reason });
     }
   }
@@ -4733,7 +4835,8 @@ async function fetchLiveGoogleSheetData(options = {}) {
     updateProgress(95, 'กำลังอัพเดทระบบ...');
 
     if (Array.isArray(requestsData)) {
-      const cleanReqs = deduplicateRequests(requestsData);
+      const localReqs = (typeof getRequests === 'function') ? getRequests() : (inMemoryRequests || []);
+      const cleanReqs = deduplicateRequests([...requestsData, ...localReqs]);
       inMemoryRequests = cleanReqs;
       localStorage.setItem('eredt_requests', JSON.stringify(cleanReqs));
     }
