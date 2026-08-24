@@ -208,12 +208,12 @@ function checkSubmissionWindow(now = new Date()) {
   const startSeconds = (8 * 60 + 30) * 60;        // 08:30:00 (30600)
 
   if (totalSeconds < startSeconds) {
-    return { isOpen: false, reason: 'before_time', message: `ระบบเปิดรับยื่นเวลา 08.30 น. (ปัจจุบัน ${timeStr})`, timeStr };
+    return { isOpen: false, reason: 'before_time', message: `ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์ตั้งแต่ 08.30 น. เป็นต้นไป (ปัจจุบัน ${timeStr})`, timeStr };
   }
   if (totalSeconds > cutoffSeconds) {
-    return { isOpen: false, reason: 'past_16', message: `ถึงเวลา/เลยเวลา 16.00.01 น. แล้ว (${timeStr}) — ปิดรับยื่นทางอิเล็กทรอนิกส์`, timeStr };
+    return { isOpen: false, reason: 'past_16', message: `ปิดรับการส่งไฟล์สำหรับวันนี้ (ปัจจุบัน ${timeStr})`, timeStr };
   }
-  return { isOpen: true, reason: 'open', message: `เปิดรับยื่นคำร้องอิเล็กทรอนิกส์ (ยื่นได้ถึง 16.00.00 น.)`, timeStr };
+  return { isOpen: true, reason: 'open', message: `เปิดรับยื่นคำร้องอิเล็กทรอนิกส์ (ยื่นได้ถึง 16.00 น.)`, timeStr };
 }
 
 function capMaxK(cap) {
@@ -1022,24 +1022,31 @@ function checkTimeWindow() {
     return {
       isOpen: false,
       reason: `ระบบปิดรับคำร้องในวันเสาร์-อาทิตย์ (${dayNames[day]} เวลา ${formattedTime})`,
-      timeStr: formattedTime
+      timeStr: formattedTime,
+      isBefore: false,
+      isAfter: false
     };
   }
 
   if (!isWithinTime) {
+    const isPast = totalSeconds > endWindowSec;
     return {
       isOpen: false,
-      reason: totalSeconds > endWindowSec
-        ? `ถึงเวลา/เลยเวลา 16.00.01 น. แล้ว (${dayNames[day]} เวลา ${formattedTime}) — ปิดรับการอัพโหลดคำร้อง`
-        : `ระบบเปิดรับคำร้องระหว่างเวลา 08.30 - 16.00 น. เท่านั้น (${dayNames[day]} เวลา ${formattedTime})`,
-      timeStr: formattedTime
+      reason: isPast
+        ? `ปิดรับการส่งไฟล์สำหรับวันนี้ (${dayNames[day]} เวลา ${formattedTime})`
+        : `ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์ตั้งแต่ 08.30 น. เป็นต้นไป (${dayNames[day]} เวลา ${formattedTime})`,
+      timeStr: formattedTime,
+      isBefore: !isPast,
+      isAfter: isPast
     };
   }
 
   return {
     isOpen: true,
     reason: `ระบบเปิดรับคำร้องยื่นผัดฟ้องฝากขัง (${dayNames[day]} เวลา ${formattedTime})`,
-    timeStr: formattedTime
+    timeStr: formattedTime,
+    isBefore: false,
+    isAfter: false
   };
 }
 
@@ -1091,12 +1098,17 @@ function updateTimeWindowBanner() {
     }
   }
 
-  // อัพเดตสถานะปุ่มอัพโหลดแบบ Real-time ทุกวินาทีเมื่อถึงเวลา 16.00.01 น.
+  // อัพเดตสถานะปุ่มอัพโหลดแบบ Real-time ทุกวินาทีเมื่ออยู่นอกเวลา 08.30 - 16.00 น.
   updateLiveUploadButtonsState(timeCheck);
 }
 
 function updateLiveUploadButtonsState(timeCheck) {
   if (!timeCheck) timeCheck = checkTimeWindow();
+
+  const isBefore = timeCheck.isBefore || (timeCheck.reason && timeCheck.reason.includes('ยังไม่ถึงเวลา'));
+  const disabledTitle = isBefore
+    ? 'ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์ตั้งแต่ 08.30 น. เป็นต้นไป'
+    : 'ปิดรับการส่งไฟล์สำหรับวันนี้ (ต้องนำยื่นศาลด้วยตนเอง)';
 
   // 1. ปุ่ม "อัพโหลดไฟล์ PDF ทันที" บน Mobile Quick Upload Card
   const quickUploadBtn = document.getElementById('btnPoliceQuickUpload');
@@ -1107,7 +1119,7 @@ function updateLiveUploadButtonsState(timeCheck) {
       quickUploadBtn.style.cursor = 'not-allowed';
       quickUploadBtn.style.backgroundColor = '#94a3b8';
       quickUploadBtn.style.color = '#ffffff';
-      quickUploadBtn.title = 'ถึงเวลา/เลยเวลา 16.00.01 น. แล้ว ระบบปิดรับการอัพโหลดไฟล์ (ต้องนำยื่นศาลด้วยตนเอง)';
+      quickUploadBtn.title = disabledTitle;
     } else {
       quickUploadBtn.disabled = false;
       quickUploadBtn.style.opacity = '1';
@@ -1118,8 +1130,8 @@ function updateLiveUploadButtonsState(timeCheck) {
     }
   }
 
-  // 2. ปุ่มอัพโหลดทั้งหมดในตารางของตำรวจ (.btn-police-upload)
-  const tableUploadBtns = document.querySelectorAll('.btn-police-upload');
+  // 2. ปุ่มอัพโหลดทั้งหมดในตารางของตำรวจ (.btn-police-upload, .btn-police-upload-inline)
+  const tableUploadBtns = document.querySelectorAll('.btn-police-upload, .btn-police-upload-inline');
   tableUploadBtns.forEach(btn => {
     if (!timeCheck.isOpen) {
       btn.disabled = true;
@@ -1127,7 +1139,7 @@ function updateLiveUploadButtonsState(timeCheck) {
       btn.style.cursor = 'not-allowed';
       btn.style.backgroundColor = '#94a3b8';
       btn.style.borderColor = '#94a3b8';
-      btn.title = 'ถึงเวลา/เลยเวลา 16.00.01 น. แล้ว ระบบปิดรับการอัพโหลดไฟล์';
+      btn.title = disabledTitle;
     }
   });
 
@@ -1140,7 +1152,10 @@ function updateLiveUploadButtonsState(timeCheck) {
       statusDiv.style.display = 'block';
       statusDiv.style.background = '#fee2e2';
       statusDiv.style.color = '#991b1b';
-      statusDiv.innerHTML = `<i class="fa-solid fa-clock"></i> ถึงเวลา 16.00.01 น. แล้ว ระบบปิดรับการอัพโหลดคำร้องออนไลน์ กรุณานำยื่นศาลด้วยตนเอง`;
+      const modalMsg = isBefore
+        ? 'ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์ตั้งแต่ 08.30 น. เป็นต้นไป'
+        : 'ปิดรับการส่งไฟล์สำหรับวันนี้ กรุณานำยื่นศาลด้วยตนเอง';
+      statusDiv.innerHTML = `<i class="fa-solid fa-clock"></i> ${modalMsg}`;
     }
   }
 }
@@ -1978,10 +1993,13 @@ function openDayDetailModal(dayISO) {
         `;
       } else {
         if (isClosedTime) {
+          const isBefore = windowCheck.reason === 'before_time';
+          const badgeText = isBefore ? 'ยังไม่ถึง 08.30 น.' : 'ปิดรับการส่งไฟล์สำหรับวันนี้';
+          const badgeTitle = isBefore ? 'ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์ตั้งแต่ 08.30 น. เป็นต้นไป' : 'ปิดรับการส่งไฟล์สำหรับวันนี้ (ต้องนำเอกสารไปยื่นต่อศาลด้วยตนเอง)';
           actionHtml = `
             <div style="display: flex; flex-direction: column; gap: 0.2rem; text-align: left;">
-              <button disabled type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; width: auto; opacity: 0.6; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8; color: #fff;" title="เลยเวลา 16.00 น. ของวันครบกำหนดยื่นในระบบแล้ว ต้องนำเอกสารไปยื่นต่อศาลด้วยตนเอง">
-                <i class="fa-solid fa-lock"></i> เลย 16.00 น. (ปิดรับ)
+              <button disabled type="button" class="btn-secondary" style="padding: 0.25rem 0.55rem; font-size: 0.75rem; width: auto; opacity: 0.6; cursor: not-allowed; background-color: #94a3b8; border-color: #94a3b8; color: #fff;" title="${badgeTitle}">
+                <i class="fa-solid fa-lock"></i> ${badgeText}
               </button>
               ${c.fileName ? `
                 <button onclick="Swal.close(); previewPdfFile('${c.caseNumber}', event);" type="button" class="btn-secondary" style="padding: 0.2rem 0.45rem; font-size: 0.75rem; width: auto; background-color: #0284c7; color: #fff;" title="ดูไฟล์ PDF">
@@ -2239,10 +2257,15 @@ function renderPoliceTable() {
             </button>
           `;
 
+          const isBefore = windowCheck.reason === 'before_time';
+          const closedReasonText = isBefore
+            ? 'ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์ตั้งแต่ 08.30 น. เป็นต้นไป'
+            : 'ปิดรับการส่งไฟล์สำหรับวันนี้';
+
           const canReupload = isReturnedByCourt || (!isClosedTime && !c.closed);
           const reuploadTitle = isReturnedByCourt
             ? `ศาลส่งคืนคำร้อง: ${courtReturnReason || 'ให้อัพโหลดไฟล์ใหม่'} (อนุญาตให้อัพโหลดไฟล์ทับได้)`
-            : (isClosedTime ? 'เลยเวลา 16.00 น. ไม่สามารถอัพโหลดทับได้' : 'อัพโหลดไฟล์ใหม่ทับของเดิม');
+            : (isClosedTime ? `${closedReasonText} ไม่สามารถอัพโหลดทับได้` : 'อัพโหลดไฟล์ใหม่ทับของเดิม');
 
           const btnStyle = isReturnedByCourt
             ? 'background-color: #d97706 !important; border-color: #d97706 !important; color: #ffffff !important; font-weight: 700;'
@@ -2265,7 +2288,10 @@ function renderPoliceTable() {
           // File has NOT been uploaded yet (or was cleared upon return)
           const canUpload = isReturnedByCourt || !isClosedTime;
           if (!canUpload) {
-            actionButtons += `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 700; white-space: nowrap;"><i class="fa-solid fa-ban"></i> เลย 16.00 น. ยื่นที่ศาลด้วยตนเอง</span>`;
+            const isBefore = windowCheck.reason === 'before_time';
+            const badgeLabel = isBefore ? 'ยังไม่ถึง 08.30 น.' : 'ปิดรับการส่งไฟล์สำหรับวันนี้';
+            const badgeMsg = isBefore ? 'ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์ตั้งแต่ 08.30 น. เป็นต้นไป' : 'ปิดรับการส่งไฟล์สำหรับวันนี้ ยื่นที่ศาลด้วยตนเอง';
+            actionButtons += `<span style="font-size: 0.75rem; color: #dc2626; font-weight: 700; white-space: nowrap;" title="${badgeMsg}"><i class="fa-solid fa-ban"></i> ${badgeLabel}</span>`;
           } else {
             const btnStyle = isReturnedByCourt
               ? 'background-color: #d97706 !important; border-color: #d97706 !important; color: #ffffff !important; font-weight: 700;'
@@ -2486,13 +2512,14 @@ function openUploadModal(caseNumber) {
 
   const windowCheck = checkSubmissionWindow(now);
   if (!isReturnedByCourt && !windowCheck.isOpen) {
+    const isBefore = windowCheck.reason === 'before_time';
     Swal.fire({
       icon: 'warning',
-      title: 'นอกเวลาให้บริการยื่นคำร้อง',
+      title: isBefore ? 'ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์' : 'ปิดรับการส่งไฟล์สำหรับวันนี้',
       html: `<div style="text-align: left; font-size: 0.9rem; color: #334155; line-height: 1.6;">
               <p style="color: #dc2626; font-weight: 700; margin-bottom: 0.5rem;"><i class="fa-solid fa-clock"></i> ${windowCheck.message}</p>
               <p style="color: #475569;">ระบบเปิดให้อัพโหลดคำร้องในวันทำการเฉพาะช่วงเวลา <b>08.30 - 16.00 น.</b> เท่านั้น</p>
-              <p style="color: #b45309; font-weight: 600;">* หากมีความจำเป็นเร่งด่วน กรุณานำเอกสารไปยื่นต่อศาลด้วยตนเอง</p>
+              ${isBefore ? '<p style="color: #2563eb; font-weight: 600;">* ระบบจะเปิดให้อัพโหลดไฟล์ตั้งแต่เวลา 08.30 น. เป็นต้นไป</p>' : '<p style="color: #b45309; font-weight: 600;">* หากมีความจำเป็นเร่งด่วน กรุณานำเอกสารไปยื่นต่อศาลด้วยตนเอง</p>'}
              </div>`,
       confirmButtonText: 'รับทราบ',
       confirmButtonColor: '#1e3a8a'
@@ -2659,13 +2686,14 @@ function handleCreateRequest(event) {
   if (targetCase.closed || (!isReturnedByCourt && (isPast || !windowCheck.isOpen))) {
     closeModal('addRequestModal');
     let errTitle = 'ไม่สามารถอัพโหลดไฟล์ได้';
-    let errMsg = 'ขณะนี้เลยเวลา 16.00 น. หรือปิดรับยื่นคำร้องออนไลน์แล้ว กรุณานำเอกสารยื่นต่อศาลด้วยตนเอง';
+    let errMsg = 'ปิดรับการส่งไฟล์สำหรับวันนี้ กรุณานำเอกสารยื่นต่อศาลด้วยตนเอง';
     if (targetCase.closed) {
       errMsg = 'คดีนี้ปิดสำนวนเสร็จสิ้นการฝากขังแล้ว ไม่สามารถดำเนินการต่อได้';
     } else if (isPast) {
       errMsg = `เลยเวลา 16.00 น. ของวันครบกำหนดยื่นในระบบแล้ว (${formatThaiDate(targetCase.filingDeadline)}) กรุณานำเอกสารไปยื่นต่อศาลด้วยตนเอง`;
     } else if (!windowCheck.isOpen) {
-      errTitle = 'นอกเวลาให้บริการยื่นคำร้อง';
+      const isBefore = windowCheck.reason === 'before_time';
+      errTitle = isBefore ? 'ยังไม่ถึงเวลาเปิดให้อัพโหลดไฟล์' : 'ปิดรับการส่งไฟล์สำหรับวันนี้';
       errMsg = `${windowCheck.message} (ระบบเปิดให้อัพโหลดคำร้องในวันทำการ เวลา 08.30 - 16.00 น.)`;
     }
 
